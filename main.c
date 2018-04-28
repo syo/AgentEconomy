@@ -10,6 +10,7 @@
 #endif
 
 #define TICKS 32 //how many ticks of time to run this for 
+#define BLOCK 4 //size of a communication block; each block gets one dispatcher rank
 
 typedef struct{
     int location; //node id of a location
@@ -42,6 +43,21 @@ void dispatcherOp() {
     //send completion message out when complete
 }
 
+/* Handles code for event processor ranks */
+void processorOp() {
+    //wait for a command
+
+    //process event on node network
+
+    //check for inconsistencies on that node
+
+    // reconcile them
+
+    //update state
+
+    //return when received completion message
+}
+
 int main (int argc, char** argv) {
     // set up info for timing
     double time_in_secs = 0;
@@ -66,20 +82,16 @@ int main (int argc, char** argv) {
     }
 
     //determine if rank is dispatcher
-    int dispatcher = 1;
+    //NOTE: there must be at least 1 block of ranks for this program to operate
+    int dispatcher = 0;
+    if (mpi_rank % BLOCK == 0) { //the first rank in each block gets to be the dispatcher
+        dispatcher = 1;
+    }
 
     if (dispatcher == 1) { //if dispatcher
         dispatcherOp();
     } else { //if not dispatcher
-        //wait for a command
-
-        //process event on node network
-
-        //check for inconsistencies on that node
-
-        // reconcile them
-
-        //update state
+        processorOp();
     }
     if (world_rank == 0) { //end timer
         end_cycles= GetTimeBase();
