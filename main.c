@@ -1,6 +1,7 @@
 #include <mpi.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdbool.h>
 
 //#define BGQ 1 // when running BG/Q, comment out when running on kratos
 #ifdef BGQ
@@ -11,6 +12,11 @@
 
 #define TICKS 32 //how many ticks of time to run this for 
 #define BLOCK 4 //size of a communication block; each block gets one dispatcher rank
+#define TIME_COST 1 //how much each unit of distance travelled costs the agent
+#define INVENTORY_CAP 10 //how much an agent can carry at maximum
+#define EXPLORE_THRESHOLD -100 //At what point a lack of profitable moves causes the agent to explore randomly
+#define AGENTS 20 //Number of agents, temporary, should be replaced with variable
+
 
 typedef struct{
     int location; //node id of a location
@@ -21,20 +27,36 @@ typedef struct {
     int node_id; //id of this node
     int buy_price; //how much it buys an item for
     int sell_price; //how much it sells an item for
+	int advanced_time; //What the locally updated time is(for determining consistency)
+	Node* previous_state; //For rolling back node states
     int* connected; //array of nodes it is connected to
+	unsigned int connection_size;
 } Node;
 
 typedef struct {
     int agent_id; //id of this agent
     int inventory; //size of its inventory
     int location; //node_id of the node it is currently at 
+	int advanced_time; //
+	
     LocPrice* prices; //array of locations it has visited and their price
+	unsigned int prices_size;
 } Agent;
+
+typedef struct {
+	int location;//Id of node the event occurs at
+	int agent_id;//Id of agent that is invoking the event
+	int time;//Time event is scheduled to occur
+} Event;
 
 /* Writes the agent with specified id to a file for shared memory access */
 void writeAgentToFile(int agent_id) {
 
     
+}
+
+bool isEventBefore(Event* events,int events_size,int time){
+	
 }
 
 /* Handles code for dispatcher ranks */
@@ -44,14 +66,23 @@ void dispatcherOp() {
     MPI_Comm_rank(MPI_COMM_WORLD, &mpi_rank);
     //go through event list
     //send completion message out when complete
-    if (nomoreventsintime) {
-        *command = 0;
-        int i, destination;
-        for (i=1; i < BLOCK; i++) {
-            destination = mpi_rank + i;
-            MPI_Send(&command, 1, MPI_INT, destination, 0, MPI_COMM_WORLD);//send exit command out to all ranks in this block
-        }
-    }
+	Event* events;
+	events = calloc(sizeof(Event),AGENTS);
+	int events_size = AGENTS;
+	
+	while(isEventBefore(events,events_size,TICKS){
+		//Dispatch events here.
+		
+		
+		//Resolve incoming messages.
+	}
+	
+	*command = 0;
+	int i, destination;
+	for (i=1; i < BLOCK; i++) {
+		destination = mpi_rank + i;
+		MPI_Send(&command, 1, MPI_INT, destination, 0, MPI_COMM_WORLD);//send exit command out to all ranks in this block
+	}
 }
 
 /* Handles code for event handler ranks */
@@ -68,16 +99,93 @@ void handlerOp() {
 
         // XXX TODO: full list of commands
         switch(command) { //determine what the command is and execute properly
-            case 1: //
-                //get an event from MPI recv and schedule it
-                
-                //process event on node network
-
-                //check for inconsistencies on that node
-
-                // reconcile them
-
+			case 2: //Update state for node
+				int node_id;
+				int new_price;
+				int new_time;
+				
+				MPI_IRecv(&node_id, 1, MPI_INT, dispatcher,2,MPI_COMM_WORLD,MPI_STATUS_IGNORE,);
+				MPI_IRecv(&new_price, 1, MPI_INT, dispatcher,2,MPI_COMM_WORLD,MPI_STATUS_IGNORE,);
+				MPI_IRecv(&new_time, 1, MPI_INT, dispatcher,2,MPI_COMM_WORLD,MPI_STATUS_IGNORE,);
+								
+				Node* node = getnode(node_id);
+				
+				//Create a new node with updated parameters and replace the old node with it.
+				Node* new_node = malloc(sizeof(Node));
+				new_node.node_id = node.node_id;
+				new_node.buy_price = new_price;
+				new_node.sell_price = sell_price;
+				new_node.advanced_time = new_time;
+				new_node.previous_state = node;
+				new_node.connected = calloc(sizeof(int),node.connected_size);
+				for(int i = 0; i < connected_size; i++
+					new_node.connected[i] = node.connected[i];
+				
+				replacenode(node_id,new_node);
+				
+				break;
+				
                 //update state
+            case 1: //Tag corresponds to case of command, i.e. a case 1/evaluate event reads messages with tag 1
+                //get an event from MPI recv and schedule it
+				
+				int agent_id;
+				
+				MPI_IRecv(&agent_id, 1, MPI_INT, dispatcher,1,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
+				
+				struct Agent agent = getagent(agent_id);
+				
+				int most_profit_node;
+				int highest_profit;
+				
+				//Find the most profitable way to sell/fill our inventory.
+				for(int i = 0; i < agent.prices_size ; i++)
+				{
+					int dist_cost = getDist(agent.prices[i].location) * TIME_COST;
+					int profit
+					//If we have inventory sell it, if we don't try to fill it
+					if(inventory != 0)
+						profit = agent.inventory * agent.prices[i].price;
+					else
+						profit = (INVENTORY_CAP - agent.inventory) * -agent.prices[i].price;
+					profit -= dist_cost;
+					if(profit > highest_profit)
+					{
+						most_profit_node = agent.prices[i].location;
+						highest_profit = profit;
+					}
+				}
+				
+				if(most_profit_node == agent.location)
+				{
+					//Buying/selling at current node
+					if(inventory != 0)
+						inventory = 0;
+					else
+						inventory = INVENTORY_CAP;
+				}
+				
+				//Create a new event in the most profitable direction.
+				int next_node_id = getFirstInPath(agent.location,most_profit_node);
+				int disp_command = 2;
+				MPI_ISend(&disp_command, 1, MPI_INT, dispatcher, 0, MPI_COMM_WORLD);
+				MPI_ISend(&next_node, 1, MPI_INT, dispatcher, disp_command, MPI_COMM_WORLD);
+				MPI_ISent(&agent_id, 1, MPI_INT, dispatcher, disp_command, MPI_COMM_WORLD);
+				
+				//check for inconsistencies on that node
+				
+				Node* next_node = getnode(next_node_id);
+				
+				
+				if(next_node.advanced_time > agent.advanced_time)
+				{
+					// reconcile them
+				
+					// Update local state
+				}
+				
+				break;
+				
             case 0: 
                 //return when received completion message
                 done = 1;
