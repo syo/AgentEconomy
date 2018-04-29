@@ -39,23 +39,50 @@ void writeAgentToFile(int agent_id) {
 
 /* Handles code for dispatcher ranks */
 void dispatcherOp() {
-    //count down ticks
+    int mpi_rank = -1;
+    int command;
+    MPI_Comm_rank(MPI_COMM_WORLD, &mpi_rank);
+    //go through event list
     //send completion message out when complete
+    if (nomoreventsintime) {
+        *command = 0;
+        int i, destination;
+        for (i=1; i < BLOCK; i++) {
+            destination = mpi_rank + i;
+            MPI_Send(&command, 1, MPI_INT, destination, 0, MPI_COMM_WORLD);//send exit command out to all ranks in this block
+        }
+    }
 }
 
-/* Handles code for event processor ranks */
-void processorOp() {
-    //wait for a command
+/* Handles code for event handler ranks */
+void handlerOp() {
+    int mpi_rank = -1;
+    MPI_Comm_rank(MPI_COMM_WORLD, &mpi_rank);
+    int dispatcher = mpi_rank - (mpi_rank % BLOCK); // calculate the dispatcher id for this rank
+    int done = 0;
+    while (!done) {
+        //wait for a command
+        int command;
+        MPI_Recv(&command, 1, MPI_INT, dispatcher, 0, MPI_COMM_WORLD,
+            MPI_STATUS_IGNORE);
 
-    //process event on node network
+        // XXX TODO: full list of commands
+        switch(command) { //determine what the command is and execute properly
+            case 1: //
+                //get an event from MPI recv and schedule it
+                
+                //process event on node network
 
-    //check for inconsistencies on that node
+                //check for inconsistencies on that node
 
-    // reconcile them
+                // reconcile them
 
-    //update state
-
-    //return when received completion message
+                //update state
+            case 0: 
+                //return when received completion message
+                done = 1;
+        }
+    }
 }
 
 int main (int argc, char** argv) {
@@ -91,7 +118,7 @@ int main (int argc, char** argv) {
     if (dispatcher == 1) { //if dispatcher
         dispatcherOp();
     } else { //if not dispatcher
-        processorOp();
+        handlerOp();
     }
     if (world_rank == 0) { //end timer
         end_cycles= GetTimeBase();
