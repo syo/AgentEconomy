@@ -59,6 +59,8 @@ typedef struct Subrank{
 
 Node* nodes; // Array of all nodes in the project, ordered by node_id
 
+Agent* agents; // Array of all agents in the project, by agent_id
+
 /* Writes the agent with specified id to a file for shared memory access */
 void writeAgentToFile(Agent agent) {
     // Open the agents file
@@ -117,7 +119,7 @@ int shortestPath(int start_node, int dest_node, int* next_hop) {
      dist[start_node] = 0;
 
      int min, d, m;
-     while(selected[dest_node] == 0) { //while the target has not been visited
+     while(visited[dest_node] == 0) { //while the target has not been visited
         min = 9999;
         m = 0;
         for(i=0; i < NODES; i++) { //go through each neighbor node
@@ -323,7 +325,7 @@ void handlerOp() {
 				
 				MPI_Recv(&agent_id, 1, MPI_INT, dispatcher,1,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
 				
-				Agent* agent = getagent(agent_id);
+				Agent* agent = &agents[agent_id];
 				
 				int most_profit_node;
 				int highest_profit;
@@ -336,6 +338,17 @@ void handlerOp() {
 				//Find the most profitable way to sell/fill our inventory.
 				for(int i = 0; i < agent->prices_size ; i++)
 				{
+					//Check if we're considering the current node, update price knowledge
+					if(i == agent->location)
+					{
+						agent->prices[i].price = node->buy_price;
+					}
+					//Check if we have a valid price for the node we're considering
+					if(agent->prices[i].price == -1)
+					{
+						continue;
+					}
+					
 					int next_hop;
 					int dist_cost = shortestPath(agent->location,agent->prices[i].location,&next_hop) * TIME_COST;
 					int profit;
@@ -362,8 +375,11 @@ void handlerOp() {
 						agent->inventory = INVENTORY_CAP;
 				}
 				
+				//Update agent state
 				agent->advanced_time++;
 				arrive_time = agent->advanced_time;
+				agent->location = best_hop;
+				
 				
 				//Create a new event in the most profitable direction.
 				int disp_command = 2;
@@ -395,7 +411,7 @@ void handlerOp() {
     }
 }
 
-/* Initializes the node network representing the world */
+/* Initializes the node network and agents representing the world */
 void initWorld() {
     nodes = (Node*) malloc (NODES * sizeof(Node));
     int i;
@@ -415,6 +431,24 @@ void initWorld() {
         nodes[i].connected[0] = (i + 1) % 20;
         nodes[i].connected[0] = (i - 1) % 20;            
     }
+	
+	agents = calloc(sizeof(Agent),AGENTS);
+	
+	for (i = 0; i < AGENTS;i++) {
+		//property initialization
+		agents[i].agent_id = i;
+		agents[i].inventory = 0;
+		agents[i].location = 0; //Agents get updated with events to start off, so this doesn't matter
+		agents[i].advanced_time = 0; //
+	
+		agents[i].prices = calloc(sizeof(LocPrice),NODES);//I figure that eventually, all agents will visit all nodes- save on reallocation.
+		for(int j = 0; j < NODES;j++)
+		{
+			agents[i].prices[j].location = j;
+			agents[i].prices[j].price = -1;//Flag invalid prices.
+		}
+		agents[i].prices_size = NODES;
+	}
 }
 
 int main (int argc, char** argv) {
