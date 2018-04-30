@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
+#include <string.h>
 
 //#define BGQ 1 // when running BG/Q, comment out when running on kratos
 #ifdef BGQ
@@ -23,12 +24,12 @@ typedef struct{
     int price; //price at that location
 } LocPrice;
 
-typedef struct {
+typedef struct Node{
     int node_id; //id of this node
     int buy_price; //how much it buys an item for
     int sell_price; //how much it sells an item for
 	int advanced_time; //What the locally updated time is(for determining consistency)
-	Node* previous_state; //For rolling back node states
+	struct Node* previous_state; //For rolling back node states
     int* connected; //array of nodes it is connected to
 	unsigned int connection_size; //number of nodes it is connected to
 } Node;
@@ -43,17 +44,17 @@ typedef struct {
 	unsigned int prices_size;
 } Agent;
 
-typedef struct {
+typedef struct Event{
 	int location;//Id of node the event occurs at
 	int agent_id;//Id of agent that is invoking the event
 	int time;//Time event is scheduled to occur
-	Event* next;
-	Event* previous;
+	struct Event* next;
+	struct Event* previous;
 } Event;
 
-typedef struct {
+typedef struct Subrank{
 	int mpi_rank;
-	Subrank* next;
+	struct Subrank* next;
 } Subrank;
 
 Node* nodes; // Array of all nodes in the project, ordered by node_id
@@ -70,7 +71,7 @@ void writeAgentToFile(Agent agent) {
     char* agent_str = "some agent string";
 
     // Write the agent string to agents.txt
-    MPI_File_write_at(outfile, agent.agent_id, agent_str, strlen(str), MPI_CHAR, &status);
+    MPI_File_write_at(outfile, agent.agent_id, agent_str, strlen(agent_str), MPI_CHAR, &status);
 
     // Close the file
     MPI_File_close(&outfile);
@@ -142,7 +143,7 @@ int shortestPath(int start_node, int dest_node, int* next_hop) {
      return dist[dest_node];
 }
 
-/* return true if there is an event occurring before end_time */
+/* return true if there is an event occurring before end_time 
 bool isEventBefore(Event* events,int events_size,int end_time){
     int i;
     for (i=0; i < events_size; i++) { //iterate through events
@@ -152,6 +153,7 @@ bool isEventBefore(Event* events,int events_size,int end_time){
     }
     return false;
 }
+/*
 
 /* Handles code for dispatcher ranks */
 void dispatcherOp() {
@@ -196,12 +198,12 @@ void dispatcherOp() {
 	MPI_Buffer_attach(buf,3*BLOCK*sizeof(int)+3*MPI_BSEND_OVERHEAD+1);
 	
     //go through event list
-	while(isEventBefore(next_event,events_size,TICKS)){
+	while(isEventBefore(next_event,TICKS)){
 		//Dispatch events here.
 		//Get next event that is within time limit
 		if(available_ranks != NULL)
 		{
-			while(next_event != null)
+			while(next_event != NULL)
 			{
 				Event* e = next_event;
 				if( e->time < TICKS)
@@ -212,8 +214,9 @@ void dispatcherOp() {
 				free(e);
 			}
 			command = 1;
+			int agent_id = next_event->agent_id;
 			//Send event handling command to task
-			MPI_Bsend(&command, 1, MPI_INT,available_ranks->mpi_rank,0,MPI_COMM_WORLD,);
+			MPI_Bsend(&command, 1, MPI_INT,available_ranks->mpi_rank,0,MPI_COMM_WORLD);
 			MPI_Bsend(&agent_id, 1, MPI_INT, available_ranks->mpi_rank,1,MPI_COMM_WORLD);
 			Subrank* temp_rank = available_ranks;
 			available_ranks = available_ranks->next;
@@ -224,7 +227,7 @@ void dispatcherOp() {
 		
 		int flag;
 		MPI_Status stat;
-		
+		int in_command;
 		MPI_Iprobe(MPI_ANY_SOURCE,0,MPI_COMM_WORLD,&flag,&stat);
 			
 		while(flag != 0)
@@ -232,21 +235,21 @@ void dispatcherOp() {
 			MPI_Recv(&in_command, 1, MPI_INT, stat.MPI_SOURCE, 0, MPI_COMM_WORLD,
 				MPI_STATUS_IGNORE);
 			
+			Subrank* new_rank = malloc(sizeof(Subrank));
+			int best_hop,agent_id,time;
 			switch(in_command)
 			{
 				case 0:
 					//Add rank back to available ranks
-					Subrank* new_rank = malloc(sizeof(Subrank));
 					new_rank->mpi_rank = stat.MPI_SOURCE;
 					new_rank->next = available_ranks;
 					available_ranks = new_rank;
 					break;
 				case 2:
 					//Create new event
-					int best_hop,agent_id,time;
-					MPI_Recv(&best_hop, 1, MPI_INT, stat.MPI_SOURCE, 2, MPI_COMM_WORLD);
-					MPI_Recv(&agent_id, 1, MPI_INT, stat.MPI_SOURCE, 2, MPI_COMM_WORLD);
-					MPI_Recv(&time, 1, MPI_INT, stat.MPI_SOURCE, 2, MPI_COMM_WORLD)
+					MPI_Recv(&best_hop, 1, MPI_INT, stat.MPI_SOURCE, 2, MPI_COMM_WORLD,MPI_STATUS_IGNORE);
+					MPI_Recv(&agent_id, 1, MPI_INT, stat.MPI_SOURCE, 2, MPI_COMM_WORLD,MPI_STATUS_IGNORE);
+					MPI_Recv(&time, 1, MPI_INT, stat.MPI_SOURCE, 2, MPI_COMM_WORLD,MPI_STATUS_IGNORE);
 					Event* new_event = malloc(sizeof(Event));
 					new_event->location = best_hop;
 					new_event->agent_id = agent_id;
@@ -271,6 +274,8 @@ void dispatcherOp() {
 
 /* Handles code for event handler ranks */
 void handlerOp() {
+	void* buf = calloc(sizeof(char),5*sizeof(int)+5*MPI_BSEND_OVERHEAD+1);
+	MPI_Buffer_attach(buf,5*sizeof(int)+5*MPI_BSEND_OVERHEAD+1);
     int mpi_rank = -1;
     MPI_Comm_rank(MPI_COMM_WORLD, &mpi_rank);
     int dispatcher = mpi_rank - (mpi_rank % BLOCK); // calculate the dispatcher id for this rank
@@ -284,94 +289,95 @@ void handlerOp() {
         // XXX TODO: full list of commands
         switch(command) { //determine what the command is and execute properly
 			case 2: //Update state for node
+				command = 2;
 				int node_id;
 				int new_price;
 				int new_time;
 				
-				MPI_Recv(&node_id, 1, MPI_INT, dispatcher,2,MPI_COMM_WORLD,MPI_STATUS_IGNORE,);
-				MPI_Recv(&new_price, 1, MPI_INT, dispatcher,2,MPI_COMM_WORLD,MPI_STATUS_IGNORE,);
-				MPI_Recv(&new_time, 1, MPI_INT, dispatcher,2,MPI_COMM_WORLD,MPI_STATUS_IGNORE,);
+				MPI_Recv(&node_id, 1, MPI_INT, dispatcher,2,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
+				MPI_Recv(&new_price, 1, MPI_INT, dispatcher,2,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
+				MPI_Recv(&new_time, 1, MPI_INT, dispatcher,2,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
 								
-				Node* node = getnode(node_id);
+				Node* node = &nodes[node_id];
 				
 				//Create a new node with updated parameters and replace the old node with it.
-				Node* new_node = malloc(sizeof(Node));
-				new_node.node_id = node.node_id;
-				new_node.buy_price = new_price;
-				new_node.sell_price = sell_price;
-				new_node.advanced_time = new_time;
-				new_node.previous_state = node;
-				new_node.connected = calloc(sizeof(int),node.connected_size);
-				for(int i = 0; i < connected_size; i++
+				//TEMPORARY: Just use the reference into the list
+				Node* new_node = node;
+				//new_node->node_id = node->node_id;
+				new_node->buy_price = new_price;
+				//new_node->sell_price = sell_price;
+				new_node->advanced_time = new_time;
+				//new_node->previous_state = node;
+				//new_node->connected = calloc(sizeof(int),node->connection_size);
+				/*for(int i = 0; i < node->connection_size; i++)
 					new_node.connected[i] = node.connected[i];
-				
-				replacenode(node_id,new_node);
-				
-				break;
+				*/
 				
                 //update state
+				break;
+				
             case 1: //Tag corresponds to case of command, i.e. a case 1/evaluate event reads messages with tag 1
                 //get an event from MPI recv and schedule it
-				
+				command = 1;
 				int agent_id;
 				
 				MPI_Recv(&agent_id, 1, MPI_INT, dispatcher,1,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
 				
-				struct Agent agent = getagent(agent_id);
+				Agent* agent = getagent(agent_id);
 				
 				int most_profit_node;
 				int highest_profit;
 				int best_hop;
 				int arrive_time;
 				
-				Node* node = getnode(agent.location);
+				node = &nodes[agent->location];
 				node->advanced_time = agent->advanced_time;
 				
 				//Find the most profitable way to sell/fill our inventory.
-				for(int i = 0; i < agent.prices_size ; i++)
+				for(int i = 0; i < agent->prices_size ; i++)
 				{
 					int next_hop;
-					int dist_cost = shortestPath(agent.location,agent.prices[i].location,&next_hop) * TIME_COST;
-					int profit
+					int dist_cost = shortestPath(agent->location,agent->prices[i].location,&next_hop) * TIME_COST;
+					int profit;
 					//If we have inventory sell it, if we don't try to fill it
-					if(inventory != 0)
-						profit = agent.inventory * agent.prices[i].price;
+					if(agent->inventory != 0)
+						profit = agent->inventory * agent->prices[i].price;
 					else
-						profit = (INVENTORY_CAP - agent.inventory) * -agent.prices[i].price;
+						profit = (INVENTORY_CAP - agent->inventory) * -agent->prices[i].price;
 					profit -= dist_cost;
 					if(profit > highest_profit)
 					{
 						best_hop = next_hop;
-						most_profit_node = agent.prices[i].location;
+						most_profit_node = agent->prices[i].location;
 						highest_profit = profit;
 					}
 				}
 				
-				if(most_profit_node == agent.location)
+				if(most_profit_node == agent->location)
 				{
 					//Buying/selling at current node
-					if(inventory != 0)
-						inventory = 0;
+					if(agent->inventory != 0)
+						agent->inventory = 0;
 					else
-						inventory = INVENTORY_CAP;
+						agent->inventory = INVENTORY_CAP;
 				}
 				
-				agent.advanced_time++;
-				arrive_time = agent.advanced_time;
+				agent->advanced_time++;
+				arrive_time = agent->advanced_time;
 				
 				//Create a new event in the most profitable direction.
 				int disp_command = 2;
 				MPI_Bsend(&disp_command, 1, MPI_INT, dispatcher, 0, MPI_COMM_WORLD);
 				MPI_Bsend(&best_hop, 1, MPI_INT, dispatcher, disp_command, MPI_COMM_WORLD);
 				MPI_Bsend(&agent_id, 1, MPI_INT, dispatcher, disp_command, MPI_COMM_WORLD);
-				MPI_Bsend(&
+				MPI_Bsend(&arrive_time, 1, MPI_INT, dispatcher, disp_command, MPI_COMM_WORLD);
 				
 				//check for inconsistencies on that node
 				
-				Node* next_node = getnode(next_node_id);
+				Node* next_node = &nodes[best_hop];
 				
 				
-				if(next_node.advanced_time > agent.advanced_time)
+				if(next_node->advanced_time > agent->advanced_time)
 				{
 					// reconcile them
 				
@@ -425,11 +431,11 @@ int main (int argc, char** argv) {
     MPI_Comm_size(MPI_COMM_WORLD, &world_size);
     MPI_Comm_rank(MPI_COMM_WORLD, &mpi_rank);
 
-    if(world_rank == 0) { //start timer
+    if(mpi_rank == 0) { //start timer
         start_cycles= GetTimeBase();
     }
 
-    if(world_rank == 0) { //config world and agents
+    if(mpi_rank == 0) { //config world and agents
         //config world network
         initWorld();
         //config agents
@@ -447,12 +453,12 @@ int main (int argc, char** argv) {
     } else { //if not dispatcher
         handlerOp();
     }
-    if (world_rank == 0) { //end timer
+    if (mpi_rank == 0) { //end timer
         end_cycles= GetTimeBase();
         time_in_secs = ((double)(end_cycles - start_cycles)) /
         processor_frequency;
 
-        printf("%lld ", global_sum);
+        //printf("%lld ", global_sum);
         printf("%f\n", time_in_secs);
     }
 
