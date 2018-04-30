@@ -51,12 +51,30 @@ typedef struct {
 
 /* Writes the agent with specified id to a file for shared memory access */
 void writeAgentToFile(int agent_id) {
-
+    // Open the agents file
+    MPI_File outfile;
+    MPI_Status status;
+    MPI_File_open(MPI_COMM_WORLD, "agents.txt", MPI_MODE_WRONLY | MPI_MODE_CREATE, MPI_INFO_NULL, &outfile);
     
+    // Get the agent string
+    // Placeholder
+    char* agent_str = "some agent string";
+
+    // Write the agent string to agents.txt
+    MPI_File_write_at(outfile, agent_id, agent_str, strlen(str), MPI_CHAR, &status);
+
+    // Close the file
+    MPI_File_close(&outfile);
 }
 
-bool isEventBefore(Event* events,int events_size,int time){
-	
+bool isEventBefore(Event* events,int events_size,int end_time){
+    int i;
+    for (i=0; i < events_size; i++) { //iterate through events
+        if (events[i].time < end_time) { //if there is an event that occurs before the specified time
+            return true; 
+        }
+    }
+    return false;
 }
 
 /* Handles code for dispatcher ranks */
