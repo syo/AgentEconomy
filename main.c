@@ -11,14 +11,23 @@
 #define GetTimeBase MPI_Wtime
 #endif
 
-#define TICKS 32 //how many ticks of time to run this for 
-#define BLOCK 4 //size of a communication block; each block gets one dispatcher rank
-#define TIME_COST 1 //how much each unit of distance travelled costs the agent
-#define INVENTORY_CAP 10 //how much an agent can carry at maximum
-#define EXPLORE_THRESHOLD -100 //At what point a lack of profitable moves causes the agent to explore randomly
-#define AGENTS 20 //Number of agents, temporary, should be replaced with variable
-#define NODES 20 // Number of nodes
+
+int num_agents;
+int num_nodes;
+int ticks;
+int block_size;
+int time_cost;
+int explore_threshold;
+
+
 #define LOCAL_UPDATE_BUFFER 6//Number of buffer spaces to allow for node updates.
+#define TICKS ticks //32 //how many ticks of time to run this for 
+#define BLOCK block_size //2 //size of a communication block; each block gets one dispatcher rank
+#define TIME_COST time_cost // //how much each unit of distance travelled costs the agent
+#define INVENTORY_CAP 10 //how much an agent can carry at maximum
+#define EXPLORE_THRESHOLD explore_threshold //-100 //At what point a lack of profitable moves causes the agent to explore randomly
+#define AGENTS num_agents //20 //Number of agents, temporary, should be replaced with variable
+#define NODES num_nodes //20 // Number of nodes
 
 typedef struct{
     int location; //node id of a location
@@ -106,9 +115,11 @@ bool isNeighbor(int current, int q) {
 
 /* implements dijkstras algorithm for finding the shortest path length */
 int shortestPath(int start_node, int dest_node, int* next_hop) {
-     int dist[NODES]; //distance of node i to starting node
-     int prev[NODES]; //previous nodes in best path
-     int visited[NODES] = {0}; //has node been visited
+     int* dist = calloc(sizeof(int),num_nodes); //distance of node i to starting node
+     int* prev = calloc(sizeof(int),num_nodes); //previous nodes in best path
+     int* visited = calloc(sizeof(int),num_nodes); //has node been visited
+	 for(int i = 0; i < num_nodes; i++)
+		visited[i] = 0;
      int current = start_node; //currently at starting node
      
 	 if(start_node == dest_node)
@@ -149,6 +160,9 @@ int shortestPath(int start_node, int dest_node, int* next_hop) {
 	 *next_hop = dest_node;
 	 while(prev[*next_hop] != start_node)
 		*next_hop = prev[*next_hop];
+	free(dist);
+	free(prev);
+	free(visited);
      return dist[dest_node];
 }
 
@@ -407,8 +421,10 @@ void dispatcherOp() {
 							break;
 						}
 					}
-				case 4://Clear lock for node
+				case 4://Clear lock for node and remove it from event list
 					dispatching_locks[stat.MPI_SOURCE / BLOCK] = -1;
+					int req_node;
+					MPI_Recv(&req_node,1,MPI_INT,stat.MPI_SOURCE,4,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
 					break;
 				default:
 					break;
@@ -615,7 +631,12 @@ void initWorld() {
 	}
 }
 
+
 int main (int argc, char** argv) {
+    /* 
+    * run with: 
+    * mpirun -np <number of ranks> ./main.exe <number of nodes> <number of agents> <ticks> <block size> <time cost> <explore threshold 
+    */
     // set up info for timing
     double time_in_secs = 0;
     double processor_frequency = 1600000000.0;
@@ -628,6 +649,14 @@ int main (int argc, char** argv) {
     MPI_Init(&argc, &argv);
     MPI_Comm_size(MPI_COMM_WORLD, &world_size);
     MPI_Comm_rank(MPI_COMM_WORLD, &mpi_rank);
+
+    // set global vars to arguments
+    num_agents = atoi(argv[1]);
+    num_nodes = atoi(argv[2]);
+    ticks = atoi(argv[3]);
+    block_size = atoi(argv[4]);
+    time_cost = atoi(argv[5]);
+    explore_threshold = atoi(argv[6]);
 
     if(mpi_rank == 0) { //start timer
         start_cycles= GetTimeBase();
