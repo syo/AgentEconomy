@@ -12,12 +12,13 @@
 #endif
 
 #define TICKS 32 //how many ticks of time to run this for 
-#define BLOCK 2 //size of a communication block; each block gets one dispatcher rank
+#define BLOCK 4 //size of a communication block; each block gets one dispatcher rank
 #define TIME_COST 1 //how much each unit of distance travelled costs the agent
 #define INVENTORY_CAP 10 //how much an agent can carry at maximum
 #define EXPLORE_THRESHOLD -100 //At what point a lack of profitable moves causes the agent to explore randomly
 #define AGENTS 20 //Number of agents, temporary, should be replaced with variable
 #define NODES 20 // Number of nodes
+#define LOCAL_UPDATE_BUFFER 6//Number of buffer spaces to allow for node updates.
 
 typedef struct{
     int location; //node id of a location
@@ -211,9 +212,10 @@ void dispatcherOp() {
 		//Get next event that is within time limit
 		if(available_ranks != NULL)
 		{
-			Event* e = next_event;
+			Event* e;
 			while(next_event != NULL)
-			{
+			{	
+				e = next_event;
 				if( e->time < TICKS)
 				{
 					break;
@@ -229,6 +231,7 @@ void dispatcherOp() {
 			MPI_Bsend(&agent_id, 1, MPI_INT, available_ranks->mpi_rank,1,MPI_COMM_WORLD);
 			Subrank* temp_rank = available_ranks;
 			available_ranks = available_ranks->next;
+			e = next_event;
 			next_event = next_event->previous;
 			next_event->next = NULL;
 			free(e);
@@ -291,10 +294,12 @@ void dispatcherOp() {
 
 /* Handles code for event handler ranks */
 void handlerOp() {
-	void* buf = calloc(sizeof(char),5*sizeof(int)+5*MPI_BSEND_OVERHEAD+1);
-	MPI_Buffer_attach(buf,5*sizeof(int)+5*MPI_BSEND_OVERHEAD+1);
     int mpi_rank = -1;
+	int world_size;
+    MPI_Comm_size(MPI_COMM_WORLD, &world_size);
     MPI_Comm_rank(MPI_COMM_WORLD, &mpi_rank);
+	void* buf = calloc(sizeof(char),4*sizeof(int)*NODES*LOCAL_UPDATE_BUFFER+4*NODES*MPI_BSEND_OVERHEAD*LOCAL_UPDATE_BUFFER+1);
+	MPI_Buffer_attach(buf,4*sizeof(int)*NODES*LOCAL_UPDATE_BUFFER+4*NODES*MPI_BSEND_OVERHEAD*LOCAL_UPDATE_BUFFER+1);
     int dispatcher = mpi_rank - (mpi_rank % BLOCK); // calculate the dispatcher id for this rank
     int done = 0;
     while (!done) {
@@ -395,7 +400,16 @@ void handlerOp() {
 				arrive_time = agent->advanced_time;
 				agent->location = best_hop;
 				
-				
+				for(int i = 0; i < world_size; i++)
+				{
+					if(i % BLOCK == 0)
+						continue;
+					int worker_command = 2;
+					MPI_Bsend(&worker_command, 1, MPI_INT, i,0,MPI_COMM_WORLD);
+					MPI_Bsend(&node->node_id, 1, MPI_INT, i,2,MPI_COMM_WORLD);
+					MPI_Bsend(&node->buy_price, 1, MPI_INT, i,2,MPI_COMM_WORLD);
+					MPI_Bsend(&node->advanced_time, 1, MPI_INT, i,2,MPI_COMM_WORLD);
+				}
 				//Create a new event in the most profitable direction.
 				int disp_command = 2;
 				MPI_Bsend(&disp_command, 1, MPI_INT, dispatcher, 0, MPI_COMM_WORLD);
@@ -403,11 +417,10 @@ void handlerOp() {
 				MPI_Bsend(&agent_id, 1, MPI_INT, dispatcher, disp_command, MPI_COMM_WORLD);
 				MPI_Bsend(&arrive_time, 1, MPI_INT, dispatcher, disp_command, MPI_COMM_WORLD);
 				
-				//check for inconsistencies on that node
-				
 				Node* next_node = &nodes[best_hop];
 				
 				
+				//check for inconsistencies on that node
 				if(next_node->advanced_time > agent->advanced_time)
 				{
 					// reconcile them
