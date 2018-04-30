@@ -19,6 +19,8 @@
 #define AGENTS 20 //Number of agents, temporary, should be replaced with variable
 #define NODES 20 // Number of nodes
 
+int num_agents, num_nodes, ticks, block_size, time_cost, explore_threshold; // set by arguments of program call
+
 typedef struct{
     int location; //node id of a location
     int price; //price at that location
@@ -458,6 +460,10 @@ void initWorld() {
 }
 
 int main (int argc, char** argv) {
+    /* 
+    * run with: 
+    * mpirun -np <number of ranks> ./main.exe <number of nodes> <number of agents> <ticks> <block size> <time cost> <explore threshold 
+    */
     // set up info for timing
     double time_in_secs = 0;
     double processor_frequency = 1600000000.0;
@@ -470,6 +476,14 @@ int main (int argc, char** argv) {
     MPI_Init(&argc, &argv);
     MPI_Comm_size(MPI_COMM_WORLD, &world_size);
     MPI_Comm_rank(MPI_COMM_WORLD, &mpi_rank);
+
+    // set global vars to arguments
+    num_agents = atoi(argv[1]);
+    num_nodes = atoi(argv[2]);
+    ticks = atoi(argv[3]);
+    block_size = atoi(argv[4]);
+    time_cost = atoi(argv[5]);
+    explore_threshold = atoi(argv[6]);
 
     if(mpi_rank == 0) { //start timer
         start_cycles= GetTimeBase();
