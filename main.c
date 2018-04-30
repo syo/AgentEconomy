@@ -215,13 +215,49 @@ void dispatcherOp() {
 			//Send event handling command to task
 			MPI_Bsend(&command, 1, MPI_INT,available_ranks->mpi_rank,0,MPI_COMM_WORLD,);
 			MPI_Bsend(&agent_id, 1, MPI_INT, available_ranks->mpi_rank,1,MPI_COMM_WORLD);
-			
+			Subrank* temp_rank = available_ranks;
+			available_ranks = available_ranks->next;
+			free(temp_rank);
 		}
 		
 		
 		
-		//Resolve incoming messages.
+		int flag;
+		MPI_Status stat;
 		
+		MPI_Iprobe(MPI_ANY_SOURCE,0,MPI_COMM_WORLD,&flag,&stat);
+			
+		while(flag != 0)
+		{
+			MPI_Recv(&in_command, 1, MPI_INT, stat.MPI_SOURCE, 0, MPI_COMM_WORLD,
+				MPI_STATUS_IGNORE);
+			
+			switch(in_command)
+			{
+				case 0:
+					//Add rank back to available ranks
+					Subrank* new_rank = malloc(sizeof(Subrank));
+					new_rank->mpi_rank = stat.MPI_SOURCE;
+					new_rank->next = available_ranks;
+					available_ranks = new_rank;
+					break;
+				case 2:
+					//Create new event
+					int best_hop,agent_id,time;
+					MPI_Recv(&best_hop, 1, MPI_INT, stat.MPI_SOURCE, 2, MPI_COMM_WORLD);
+					MPI_Recv(&agent_id, 1, MPI_INT, stat.MPI_SOURCE, 2, MPI_COMM_WORLD);
+					MPI_Recv(&time, 1, MPI_INT, stat.MPI_SOURCE, 2, MPI_COMM_WORLD)
+					Event* new_event = malloc(sizeof(Event));
+					new_event->location = best_hop;
+					new_event->agent_id = agent_id;
+					new_event->time = time;
+					break;
+				default:
+					break;
+			}
+			
+			MPI_Iprobe(MPI_ANY_SOURCE,0,MPI_COMM_WORLD,&flag,&stat);
+		}
 	}
 	
     //send completion message out when complete
@@ -252,9 +288,9 @@ void handlerOp() {
 				int new_price;
 				int new_time;
 				
-				MPI_IRecv(&node_id, 1, MPI_INT, dispatcher,2,MPI_COMM_WORLD,MPI_STATUS_IGNORE,);
-				MPI_IRecv(&new_price, 1, MPI_INT, dispatcher,2,MPI_COMM_WORLD,MPI_STATUS_IGNORE,);
-				MPI_IRecv(&new_time, 1, MPI_INT, dispatcher,2,MPI_COMM_WORLD,MPI_STATUS_IGNORE,);
+				MPI_Recv(&node_id, 1, MPI_INT, dispatcher,2,MPI_COMM_WORLD,MPI_STATUS_IGNORE,);
+				MPI_Recv(&new_price, 1, MPI_INT, dispatcher,2,MPI_COMM_WORLD,MPI_STATUS_IGNORE,);
+				MPI_Recv(&new_time, 1, MPI_INT, dispatcher,2,MPI_COMM_WORLD,MPI_STATUS_IGNORE,);
 								
 				Node* node = getnode(node_id);
 				
@@ -279,13 +315,17 @@ void handlerOp() {
 				
 				int agent_id;
 				
-				MPI_IRecv(&agent_id, 1, MPI_INT, dispatcher,1,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
+				MPI_Recv(&agent_id, 1, MPI_INT, dispatcher,1,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
 				
 				struct Agent agent = getagent(agent_id);
 				
 				int most_profit_node;
 				int highest_profit;
 				int best_hop;
+				int arrive_time;
+				
+				Node* node = getnode(agent.location);
+				node->advanced_time = agent->advanced_time;
 				
 				//Find the most profitable way to sell/fill our inventory.
 				for(int i = 0; i < agent.prices_size ; i++)
@@ -316,11 +356,15 @@ void handlerOp() {
 						inventory = INVENTORY_CAP;
 				}
 				
+				agent.advanced_time++;
+				arrive_time = agent.advanced_time;
+				
 				//Create a new event in the most profitable direction.
 				int disp_command = 2;
 				MPI_Bsend(&disp_command, 1, MPI_INT, dispatcher, 0, MPI_COMM_WORLD);
 				MPI_Bsend(&best_hop, 1, MPI_INT, dispatcher, disp_command, MPI_COMM_WORLD);
 				MPI_Bsend(&agent_id, 1, MPI_INT, dispatcher, disp_command, MPI_COMM_WORLD);
+				MPI_Bsend(&
 				
 				//check for inconsistencies on that node
 				
@@ -333,6 +377,9 @@ void handlerOp() {
 				
 					// Update local state
 				}
+				
+				disp_command = 0;
+				MPI_Bsend(&disp_command,1,MPI_INT,dispatcher,0,MPI_COMM_WORLD);
 				
 				break;
             case 0: 
