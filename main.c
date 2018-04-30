@@ -16,7 +16,7 @@
 #define INVENTORY_CAP 10 //how much an agent can carry at maximum
 #define EXPLORE_THRESHOLD -100 //At what point a lack of profitable moves causes the agent to explore randomly
 #define AGENTS 20 //Number of agents, temporary, should be replaced with variable
-#define NODES 30 // Number of nodes
+#define NODES 20 // Number of nodes
 
 typedef struct{
     int location; //node id of a location
@@ -30,7 +30,7 @@ typedef struct {
 	int advanced_time; //What the locally updated time is(for determining consistency)
 	Node* previous_state; //For rolling back node states
     int* connected; //array of nodes it is connected to
-	unsigned int connection_size;
+	unsigned int connection_size; //number of nodes it is connected to
 } Node;
 
 typedef struct {
@@ -389,6 +389,28 @@ void handlerOp() {
     }
 }
 
+/* Initializes the node network representing the world */
+void initWorld() {
+    nodes = (Node*) malloc (NODES * sizeof(Node));
+    int i;
+    for (i=0; i < NODES; i++) { //create NODES nodes
+        // initialize basic properties
+        nodes[i].node_id = i;
+        nodes[i].buy_price = 5; //temporary, can make it more interesting later
+        nodes[i].sell_price = 5; 
+        nodes[i].advanced_time = -1;
+        nodes[i].previous_state = NULL; // will point to old versions later
+
+        // just connect the network in a circle for now
+        // can change this up later, wanted to get something out for testing asap
+        // probably implement read-network-from-file if there's time?
+        nodes[i].connection_size = 2;
+        nodes[i].connected = (int *) malloc (nodes[i].connection_size * sizeof(int));
+        nodes[i].connected[0] = (i + 1) % 20;
+        nodes[i].connected[0] = (i - 1) % 20;            
+    }
+}
+
 int main (int argc, char** argv) {
     // set up info for timing
     double time_in_secs = 0;
@@ -409,6 +431,7 @@ int main (int argc, char** argv) {
 
     if(world_rank == 0) { //config world and agents
         //config world network
+        initWorld();
         //config agents
     }
 
