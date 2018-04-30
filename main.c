@@ -211,14 +211,15 @@ void dispatcherOp() {
 		//Get next event that is within time limit
 		if(available_ranks != NULL)
 		{
+			Event* e = next_event;
 			while(next_event != NULL)
 			{
-				Event* e = next_event;
 				if( e->time < TICKS)
 				{
 					break;
 				}
 				next_event = next_event->previous;
+				next_event->next = NULL;
 				free(e);
 			}
 			command = 1;
@@ -228,6 +229,9 @@ void dispatcherOp() {
 			MPI_Bsend(&agent_id, 1, MPI_INT, available_ranks->mpi_rank,1,MPI_COMM_WORLD);
 			Subrank* temp_rank = available_ranks;
 			available_ranks = available_ranks->next;
+			next_event = next_event->previous;
+			next_event->next = NULL;
+			free(e);
 			free(temp_rank);
 		}
 		
@@ -237,7 +241,8 @@ void dispatcherOp() {
 		MPI_Status stat;
 		int in_command;
 		MPI_Iprobe(MPI_ANY_SOURCE,0,MPI_COMM_WORLD,&flag,&stat);
-			
+		//if(stat.MPI_ERROR != 0);
+			//printf("%d\n",stat.MPI_ERROR);
 		while(flag != 0)
 		{
 			MPI_Recv(&in_command, 1, MPI_INT, stat.MPI_SOURCE, 0, MPI_COMM_WORLD,
@@ -262,6 +267,10 @@ void dispatcherOp() {
 					new_event->location = best_hop;
 					new_event->agent_id = agent_id;
 					new_event->time = time;
+					new_event->next = events;
+					new_event->previous = NULL;
+					events->previous = new_event;
+					events = new_event;
 					break;
 				default:
 					break;
