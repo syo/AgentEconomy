@@ -12,7 +12,7 @@
 #endif
 
 #define TICKS 32 //how many ticks of time to run this for 
-#define BLOCK 4 //size of a communication block; each block gets one dispatcher rank
+#define BLOCK 2 //size of a communication block; each block gets one dispatcher rank
 #define TIME_COST 1 //how much each unit of distance travelled costs the agent
 #define INVENTORY_CAP 10 //how much an agent can carry at maximum
 #define EXPLORE_THRESHOLD -100 //At what point a lack of profitable moves causes the agent to explore randomly
@@ -110,6 +110,12 @@ int shortestPath(int start_node, int dest_node, int* next_hop) {
      int visited[NODES] = {0}; //has node been visited
      int current = start_node; //currently at starting node
      
+	 if(start_node == dest_node)
+	 {
+		*next_hop = start_node;
+		return 0;
+	 }
+	 
      int i;
      for (i=0; i < NODES; i++) {
          dist[i] = 9999;
@@ -328,7 +334,7 @@ void handlerOp() {
 				Agent* agent = &agents[agent_id];
 				
 				int most_profit_node;
-				int highest_profit;
+				int highest_profit = -1000000000;//Arbitrary large negative number. INT_MIN can invoke over/underflow when manipulated
 				int best_hop;
 				int arrive_time;
 				
@@ -469,11 +475,10 @@ int main (int argc, char** argv) {
         start_cycles= GetTimeBase();
     }
 
-    if(mpi_rank == 0) { //config world and agents
-        //config world network
-        initWorld();
-        //config agents
-    }
+    //config world and agents
+    //config world network
+    initWorld();
+    //config agents
 
     //determine if rank is dispatcher
     //NOTE: there must be at least 1 block of ranks for this program to operate
