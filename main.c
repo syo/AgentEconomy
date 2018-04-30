@@ -47,7 +47,14 @@ typedef struct {
 	int location;//Id of node the event occurs at
 	int agent_id;//Id of agent that is invoking the event
 	int time;//Time event is scheduled to occur
+	Event* next;
+	Event* previous;
 } Event;
+
+typedef struct {
+	int mpi_rank;
+	Subrank* next;
+} Subrank;
 
 /* Writes the agent with specified id to a file for shared memory access */
 void writeAgentToFile(int agent_id) {
@@ -55,8 +62,16 @@ void writeAgentToFile(int agent_id) {
     
 }
 
-bool isEventBefore(Event* events,int events_size,int time){
-	
+bool isEventBefore(Event* next_event,int time){
+	while(next_event != NULL)
+	{
+		if(next_event->time < TICKS)
+		{
+			return true;
+		}
+		next_event = next_event->previous;
+	}
+	return false;
 }
 
 /* Handles code for dispatcher ranks */
@@ -64,20 +79,74 @@ void dispatcherOp() {
     int mpi_rank = -1;
     int command;
     MPI_Comm_rank(MPI_COMM_WORLD, &mpi_rank);
-    //go through event list
-    //send completion message out when complete
-	Event* events;
-	events = calloc(sizeof(Event),AGENTS);
-	int events_size = AGENTS;
+	Event* events = NULL;
+	Event* next_event = NULL;
+	//Initialize event list
+	for(int i = 0; i < AGENTS; i++)
+	{
+		Event* new_event = malloc(sizeof(Event));
+		new_event->location = i;
+		new_event->agent_id = i;
+		new_event->time = 0;
+		if(events != NULL)
+		{
+			events->previous = new_event;
+		}
+		new_event->previous = NULL;
+		new_event->next = events;
+		events = new_event;
+		if(next_event == NULL)
+		{
+			next_event = events;
+		}
+	}
 	
-	while(isEventBefore(events,events_size,TICKS){
+	Subrank* available_ranks = NULL;
+	
+	//Acquire all the handler ranks under us
+	for(int i = 1; i < BLOCK; i++)
+	{
+		Subrank* new_rank = malloc(sizeof(Subrank));
+		new_rank->mpi_rank = mpi_rank + i;
+		new_rank->next = available_ranks;
+		available_ranks = new_rank;
+	}
+	
+	//Create buffer for buffered sends
+	void* buf = calloc(sizeof(char),3*BLOCK*sizeof(int)+3*MPI_BSEND_OVERHEAD+1);
+	MPI_Buffer_attach(buf,3*BLOCK*sizeof(int)+3*MPI_BSEND_OVERHEAD+1);
+	
+    //go through event list
+	while(isEventBefore(next_event,events_size,TICKS)){
 		//Dispatch events here.
+		//Get next event that is within time limit
+		if(available_ranks != NULL)
+		{
+			while(next_event != null)
+			{
+				Event* e = next_event;
+				if( e->time < TICKS)
+				{
+					break;
+				}
+				next_event = next_event->previous;
+				free(e);
+			}
+			command = 1;
+			//Send event handling command to task
+			MPI_Bsend(&command, 1, MPI_INT,available_ranks->mpi_rank,0,MPI_COMM_WORLD,);
+			MPI_Bsend(&agent_id, 1, MPI_INT, available_ranks->mpi_rank,1,MPI_COMM_WORLD);
+			
+		}
+		
 		
 		
 		//Resolve incoming messages.
+		
 	}
 	
-	*command = 0;
+    //send completion message out when complete
+	command = 0;
 	int i, destination;
 	for (i=1; i < BLOCK; i++) {
 		destination = mpi_rank + i;
@@ -185,7 +254,6 @@ void handlerOp() {
 				}
 				
 				break;
-				
             case 0: 
                 //return when received completion message
                 done = 1;
