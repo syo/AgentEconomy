@@ -168,6 +168,8 @@ bool isEventBefore(Event* events,int events_size,int end_time){
 void dispatcherOp() {
     int mpi_rank = -1;
     int command;
+	int world_size;
+    MPI_Comm_size(MPI_COMM_WORLD, &world_size);
     MPI_Comm_rank(MPI_COMM_WORLD, &mpi_rank);
 	Event* events = NULL;
 	Event* next_event = NULL;
@@ -218,25 +220,31 @@ void dispatcherOp() {
 		if(available_ranks != NULL)
 		{
 			Event* e;
-			Event* temp;
+			bool isAvail = true;
 			//Check if the node of this event is currently locked
 			do
-			{
-				while(next_event != NULL)
+			{	
+				e = next_event;
+				while(e != NULL)
 				{	
-					e = next_event;
+					e = e->previous;
 					if( e->time < TICKS)
 					{
 						break;
 					}
 				}
-				bool isAvail = true;
+				if(e == NULL)
+					break;
 				for(int i = 0; i < world_size/BLOCK; i++)
 				{
-					if(dispatching_locks[i] == e->node;
+					if(dispatching_locks[i] == e->location)
+						isAvail = false;
 				}
 			}while(isAvail != true);
-			
+				
+			if(e != NULL)
+			{
+				
 			//Attempt to acquire the given node
 			//Send lock requests to all nodes
 			for(int i = 0; i < world_size; i += BLOCK)
@@ -252,7 +260,7 @@ void dispatcherOp() {
 			//Wait for all other dispatchers to respond
 			for(int i = 0; i < world_size/BLOCK - 1; i++)
 			{
-				MPI_Status lock_stat
+				MPI_Status lock_stat;
 				int response;
 				MPI_Recv(&response,1,MPI_INT,MPI_ANY_SOURCE,3,MPI_COMM_WORLD,&lock_stat);
 				switch(response)
@@ -266,7 +274,7 @@ void dispatcherOp() {
 						is_cleared = false;
 						i--;//Double message from another task
 						break;
-					case default://I am attempting to acquire a lock on this node myself
+					default://I am attempting to acquire a lock on this node myself
 						if(mpi_rank < lock_stat.MPI_SOURCE)//I outrank you and will usurp the lock
 						{
 							response = -2;
@@ -276,12 +284,12 @@ void dispatcherOp() {
 							response = -2;
 							is_cleared = false;
 						}
-						MPI_Send(&response,1,MPI_INT,i,3,MPI_COMM_WORLD)
+						MPI_Send(&response,1,MPI_INT,i,3,MPI_COMM_WORLD);
 						break;
 				}
 			}
 			
-			if(is_cleard == true)
+			if(is_cleared == true)
 			{
 				command = 1;
 				int agent_id = e->agent_id;
@@ -292,8 +300,14 @@ void dispatcherOp() {
 				available_ranks = available_ranks->next;
 			
 				//Remove event from list
-				next_event = next_event->previous;
-				next_event->next = NULL;
+				if(e->previous != NULL)
+					e->previous->next = e->next;
+				if(e->next != NULL)
+					e->next->previous = e->previous;
+				if(e == next_event);
+					next_event = e->previous;
+				if(e == events)
+					events = NULL;
 				free(e);
 				free(temp_rank);
 				
@@ -301,9 +315,11 @@ void dispatcherOp() {
 				{	
 					if(i == mpi_rank)
 						continue;
-					&command = 4;
+					command = 4;
 					MPI_Bsend(&command, 1, MPI_INT,i,0,MPI_COMM_WORLD);
 				}
+			}
+			
 			}
 		}
 		
@@ -340,7 +356,7 @@ void dispatcherOp() {
 					new_event->agent_id = agent_id;
 					new_event->time = time;
 					//Inserte event in a time-sorted order
-					Event insert_before = events;
+					Event* insert_before = events;
 					while(insert_before->time > new_event->time && insert_before->next != NULL)
 					{
 						insert_before = events->next;
@@ -356,7 +372,7 @@ void dispatcherOp() {
 					{
 						for(int i = 0; i < world_size;i += BLOCK)
 						{
-							if(i = mpi_rank)
+							if(i == mpi_rank)
 								continue;
 							MPI_Bsend(&in_command, 1, MPI_INT, i, 0, MPI_COMM_WORLD);
 							MPI_Bsend(&best_hop, 1, MPI_INT, i, 2, MPI_COMM_WORLD);
@@ -366,27 +382,28 @@ void dispatcherOp() {
 					}
 					break;
 				case 3://Request for lock on node
+					in_command = 3;
 					int req_node;
 					int response;
-					MPI_Recv(&req_node,1,MPI_INT,stat.MPI_SOURCE,3,MPI_COMM_WORLD,&lock_stat);
+					MPI_Recv(&req_node,1,MPI_INT,stat.MPI_SOURCE,3,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
 					for(int i = 0; i < stat.MPI_SOURCE / BLOCK; i++)
 					{
 						if(dispatching_locks[i] == req_node)
 						{
 							response = -2;
-							MPI_Send(&response, 1, MPI_INT, stat.MPI_SOURCE, 3, MPI_COMM_WORLD,MPI_STATUS_IGNORE);
+							MPI_Send(&response, 1, MPI_INT, stat.MPI_SOURCE, 3, MPI_COMM_WORLD);
 							break;
 						}
 					}
 					dispatching_locks[stat.MPI_SOURCE / BLOCK] = req_node;
 					response = -1;
-					MPI_Send(&response, 1, MPI_INT, stat.MPI_SOURCE, 3, MPI_COMM_WORLD,MPI_STATUS_IGNORE);
+					MPI_Send(&response, 1, MPI_INT, stat.MPI_SOURCE, 3, MPI_COMM_WORLD);
 					for(int i = stat.MPI_SOURCE / BLOCK + 1; i < world_size / BLOCK; i++)
 					{
 						if(dispatching_locks[i] == req_node)
 						{
 							response = -3;
-							MPI_Send(&response, 1, MPI_INT, stat.MPI_SOURCE, 3, MPI_COMM_WORLD,MPI_STATUS_IGNORE);
+							MPI_Send(&response, 1, MPI_INT, stat.MPI_SOURCE, 3, MPI_COMM_WORLD);
 							break;
 						}
 					}
