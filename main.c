@@ -203,9 +203,14 @@ void dispatcherOp() {
 	}
 	
 	//Create buffer for buffered sends
-	void* buf = calloc(sizeof(char),3*BLOCK*sizeof(int)+3*MPI_BSEND_OVERHEAD+1);
-	MPI_Buffer_attach(buf,3*BLOCK*sizeof(int)+3*MPI_BSEND_OVERHEAD+1);
+	void* buf = calloc(sizeof(char),3*BLOCK*sizeof(int)+4*world_size/BLOCK*sizeof(int)+3*MPI_BSEND_OVERHEAD+1);
+	MPI_Buffer_attach(buf,3*BLOCK*sizeof(int)+4*world_size/BLOCK*sizeof(int)+3*MPI_BSEND_OVERHEAD+1);
 	
+	int* dispatching_locks = calloc(sizeof(int),world_size/BLOCK);
+	for(int i = 0; i < world_size/BLOCK; i++)
+	{
+		dispatching_locks[i] = -1;
+	}
     //go through event list
 	while(isEventBefore(next_event,TICKS)){
 		//Dispatch events here.
@@ -213,29 +218,93 @@ void dispatcherOp() {
 		if(available_ranks != NULL)
 		{
 			Event* e;
-			while(next_event != NULL)
-			{	
-				e = next_event;
-				if( e->time < TICKS)
-				{
-					break;
+			Event* temp;
+			//Check if the node of this event is currently locked
+			do
+			{
+				while(next_event != NULL)
+				{	
+					e = next_event;
+					if( e->time < TICKS)
+					{
+						break;
+					}
 				}
+				bool isAvail = true;
+				for(int i = 0; i < world_size/BLOCK; i++)
+				{
+					if(dispatching_locks[i] == e->node;
+				}
+			}while(isAvail != true);
+			
+			//Attempt to acquire the given node
+			//Send lock requests to all nodes
+			for(int i = 0; i < world_size; i += BLOCK)
+			{	
+				if(i == mpi_rank)
+					continue;
+				command = 3;//Request to lock a node for dispatching
+				MPI_Bsend(&command, 1, MPI_INT,i,0,MPI_COMM_WORLD);
+				MPI_Bsend(&e->location,1,MPI_INT,i,3,MPI_COMM_WORLD);
+			}
+			bool is_cleared = true;
+			
+			//Wait for all other dispatchers to respond
+			for(int i = 0; i < world_size/BLOCK - 1; i++)
+			{
+				MPI_Status lock_stat
+				int response;
+				MPI_Recv(&response,1,MPI_INT,MPI_ANY_SOURCE,3,MPI_COMM_WORLD,&lock_stat);
+				switch(response)
+				{
+					case -1://Permit message
+						break;
+					case -2://I have already given my lock to a higher-priority dispatcher
+						is_cleared = false;
+						break;
+					case -3://I gave you my lock, but a higher-priority dispatcher usurped it
+						is_cleared = false;
+						i--;//Double message from another task
+						break;
+					case default://I am attempting to acquire a lock on this node myself
+						if(mpi_rank < lock_stat.MPI_SOURCE)//I outrank you and will usurp the lock
+						{
+							response = -2;
+						}
+						else
+						{
+							response = -2;
+							is_cleared = false;
+						}
+						MPI_Send(&response,1,MPI_INT,i,3,MPI_COMM_WORLD)
+						break;
+				}
+			}
+			
+			if(is_cleard == true)
+			{
+				command = 1;
+				int agent_id = e->agent_id;
+				//Send event handling command to task
+				MPI_Bsend(&command, 1, MPI_INT,available_ranks->mpi_rank,0,MPI_COMM_WORLD);
+				MPI_Bsend(&agent_id, 1, MPI_INT, available_ranks->mpi_rank,1,MPI_COMM_WORLD);
+				Subrank* temp_rank = available_ranks;
+				available_ranks = available_ranks->next;
+			
+				//Remove event from list
 				next_event = next_event->previous;
 				next_event->next = NULL;
 				free(e);
+				free(temp_rank);
+				
+				for(int i = 0; i < world_size; i += BLOCK)
+				{	
+					if(i == mpi_rank)
+						continue;
+					&command = 4;
+					MPI_Bsend(&command, 1, MPI_INT,i,0,MPI_COMM_WORLD);
+				}
 			}
-			command = 1;
-			int agent_id = next_event->agent_id;
-			//Send event handling command to task
-			MPI_Bsend(&command, 1, MPI_INT,available_ranks->mpi_rank,0,MPI_COMM_WORLD);
-			MPI_Bsend(&agent_id, 1, MPI_INT, available_ranks->mpi_rank,1,MPI_COMM_WORLD);
-			Subrank* temp_rank = available_ranks;
-			available_ranks = available_ranks->next;
-			e = next_event;
-			next_event = next_event->previous;
-			next_event->next = NULL;
-			free(e);
-			free(temp_rank);
 		}
 		
 		
@@ -270,10 +339,59 @@ void dispatcherOp() {
 					new_event->location = best_hop;
 					new_event->agent_id = agent_id;
 					new_event->time = time;
-					new_event->next = events;
-					new_event->previous = NULL;
-					events->previous = new_event;
-					events = new_event;
+					//Inserte event in a time-sorted order
+					Event insert_before = events;
+					while(insert_before->time > new_event->time && insert_before->next != NULL)
+					{
+						insert_before = events->next;
+					}
+					new_event->next = insert_before;
+					new_event->previous = insert_before->previous;
+					if(insert_before->previous != NULL)
+						insert_before->previous = new_event;
+					else
+						events = new_event;
+					//Send message to all other dispatchers to add the event if this is not a dispatcher originated message
+					if(stat.MPI_SOURCE % BLOCK != 0)
+					{
+						for(int i = 0; i < world_size;i += BLOCK)
+						{
+							if(i = mpi_rank)
+								continue;
+							MPI_Bsend(&in_command, 1, MPI_INT, i, 0, MPI_COMM_WORLD);
+							MPI_Bsend(&best_hop, 1, MPI_INT, i, 2, MPI_COMM_WORLD);
+							MPI_Bsend(&agent_id, 1, MPI_INT, i, 2, MPI_COMM_WORLD);
+							MPI_Bsend(&time, 1, MPI_INT, i, 2, MPI_COMM_WORLD);
+						}
+					}
+					break;
+				case 3://Request for lock on node
+					int req_node;
+					int response;
+					MPI_Recv(&req_node,1,MPI_INT,stat.MPI_SOURCE,3,MPI_COMM_WORLD,&lock_stat);
+					for(int i = 0; i < stat.MPI_SOURCE / BLOCK; i++)
+					{
+						if(dispatching_locks[i] == req_node)
+						{
+							response = -2;
+							MPI_Send(&response, 1, MPI_INT, stat.MPI_SOURCE, 3, MPI_COMM_WORLD,MPI_STATUS_IGNORE);
+							break;
+						}
+					}
+					dispatching_locks[stat.MPI_SOURCE / BLOCK] = req_node;
+					response = -1;
+					MPI_Send(&response, 1, MPI_INT, stat.MPI_SOURCE, 3, MPI_COMM_WORLD,MPI_STATUS_IGNORE);
+					for(int i = stat.MPI_SOURCE / BLOCK + 1; i < world_size / BLOCK; i++)
+					{
+						if(dispatching_locks[i] == req_node)
+						{
+							response = -3;
+							MPI_Send(&response, 1, MPI_INT, stat.MPI_SOURCE, 3, MPI_COMM_WORLD,MPI_STATUS_IGNORE);
+							break;
+						}
+					}
+				case 4://Clear lock for node
+					dispatching_locks[stat.MPI_SOURCE / BLOCK] = -1;
 					break;
 				default:
 					break;
@@ -283,6 +401,7 @@ void dispatcherOp() {
 		}
 	}
 	
+	free(dispatching_locks);
     //send completion message out when complete
 	command = 0;
 	int i, destination;
@@ -298,8 +417,8 @@ void handlerOp() {
 	int world_size;
     MPI_Comm_size(MPI_COMM_WORLD, &world_size);
     MPI_Comm_rank(MPI_COMM_WORLD, &mpi_rank);
-	void* buf = calloc(sizeof(char),4*sizeof(int)*NODES*LOCAL_UPDATE_BUFFER+4*NODES*MPI_BSEND_OVERHEAD*LOCAL_UPDATE_BUFFER+1);
-	MPI_Buffer_attach(buf,4*sizeof(int)*NODES*LOCAL_UPDATE_BUFFER+4*NODES*MPI_BSEND_OVERHEAD*LOCAL_UPDATE_BUFFER+1);
+	void* buf = calloc(sizeof(char),4*sizeof(int)*world_size*LOCAL_UPDATE_BUFFER+4*world_size*MPI_BSEND_OVERHEAD*LOCAL_UPDATE_BUFFER+1);
+	MPI_Buffer_attach(buf,4*sizeof(int)*world_size*LOCAL_UPDATE_BUFFER+4*world_size*MPI_BSEND_OVERHEAD*LOCAL_UPDATE_BUFFER+1);
     int dispatcher = mpi_rank - (mpi_rank % BLOCK); // calculate the dispatcher id for this rank
     int done = 0;
     while (!done) {
