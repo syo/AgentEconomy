@@ -16,7 +16,7 @@
 #define INVENTORY_CAP 10 //how much an agent can carry at maximum
 #define EXPLORE_THRESHOLD -100 //At what point a lack of profitable moves causes the agent to explore randomly
 #define AGENTS 20 //Number of agents, temporary, should be replaced with variable
-
+#define NODES 30 // Number of nodes
 
 typedef struct{
     int location; //node id of a location
@@ -49,8 +49,10 @@ typedef struct {
 	int time;//Time event is scheduled to occur
 } Event;
 
+Node* nodes; // Array of all nodes in the project, ordered by node_id
+
 /* Writes the agent with specified id to a file for shared memory access */
-void writeAgentToFile(int agent_id) {
+void writeAgentToFile(Agent agent) {
     // Open the agents file
     MPI_File outfile;
     MPI_Status status;
@@ -61,12 +63,64 @@ void writeAgentToFile(int agent_id) {
     char* agent_str = "some agent string";
 
     // Write the agent string to agents.txt
-    MPI_File_write_at(outfile, agent_id, agent_str, strlen(str), MPI_CHAR, &status);
+    MPI_File_write_at(outfile, agent.agent_id, agent_str, strlen(str), MPI_CHAR, &status);
 
     // Close the file
     MPI_File_close(&outfile);
 }
 
+/* check to see if two nodes are connected */
+bool isNeighbor(int current, int q) {
+    int i;
+    int arrsize = sizeof(nodes[current].connected) / sizeof(int);
+    for (i=0; i < arrsize; i++) { // loop through all neighbor nodes
+        if (nodes[current].connected[i] == q) { //if it matches, return true
+            return true;
+        }
+    } 
+    return false;
+}
+
+/* implements dijkstras algorithm for finding the shortest path length */
+int shortestPath(int start_node, int dest_node) {
+     int dist[NODES]; //distance of node i to starting node
+     int prev[NODES]; //previous nodes in best path
+     int visited[NODES] = {0}; //has node been visited
+     int current = start_node; //currently at starting node
+     
+     int i;
+     for (i=0; i < NODES; i++) {
+         dist[i] = 9999;
+         prev[i] = -1;
+     }
+     
+     dist[start_node] = 0;
+
+     int min, d, m;
+     while(selected[dest_node] == 0) { //while the target has not been visited
+        min = 9999;
+        m = 0;
+        for(i=0; i < NODES; i++) { //go through each neighbor node
+            if (isNeighbor(current, i) == false) { //if this node is not connected to the current node
+                continue;
+            }
+            d = dist[current] + TIME_COST; //increment distance
+            if (d < dist[i] && visited[i] == 0) { //if this is the shortest path and we have not visited it
+                dist[i] = d; //the distance to it is d
+                prev[i] = current; //the previous node is the current node
+            }
+            if (dist[i] < min && visited[i] == 0) { //if this is the minimum path
+                min = dist[i]; //set it to be so
+                m = i;
+            }
+        }
+        current = m;
+        visited[current] = 1;
+     }
+     return dist[dest_node];
+}
+
+/* return true if there is an event occurring before end_time */
 bool isEventBefore(Event* events,int events_size,int end_time){
     int i;
     for (i=0; i < events_size; i++) { //iterate through events
