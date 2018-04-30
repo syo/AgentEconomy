@@ -16,7 +16,7 @@
 #define INVENTORY_CAP 10 //how much an agent can carry at maximum
 #define EXPLORE_THRESHOLD -100 //At what point a lack of profitable moves causes the agent to explore randomly
 #define AGENTS 20 //Number of agents, temporary, should be replaced with variable
-
+#define NODES 30 // Number of nodes
 
 typedef struct{
     int location; //node id of a location
@@ -56,10 +56,24 @@ typedef struct {
 	Subrank* next;
 } Subrank;
 
-/* Writes the agent with specified id to a file for shared memory access */
-void writeAgentToFile(int agent_id) {
+Node* nodes; // Array of all nodes in the project, ordered by node_id
 
+/* Writes the agent with specified id to a file for shared memory access */
+void writeAgentToFile(Agent agent) {
+    // Open the agents file
+    MPI_File outfile;
+    MPI_Status status;
+    MPI_File_open(MPI_COMM_WORLD, "agents.txt", MPI_MODE_WRONLY | MPI_MODE_CREATE, MPI_INFO_NULL, &outfile);
     
+    // Get the agent string
+    // Placeholder
+    char* agent_str = "some agent string";
+
+    // Write the agent string to agents.txt
+    MPI_File_write_at(outfile, agent.agent_id, agent_str, strlen(str), MPI_CHAR, &status);
+
+    // Close the file
+    MPI_File_close(&outfile);
 }
 
 bool isEventBefore(Event* next_event,int time){
@@ -72,6 +86,71 @@ bool isEventBefore(Event* next_event,int time){
 		next_event = next_event->previous;
 	}
 	return false;
+}
+
+/* check to see if two nodes are connected */
+bool isNeighbor(int current, int q) {
+    int i;
+    int arrsize = sizeof(nodes[current].connected) / sizeof(int);
+    for (i=0; i < arrsize; i++) { // loop through all neighbor nodes
+        if (nodes[current].connected[i] == q) { //if it matches, return true
+            return true;
+        }
+    } 
+    return false;
+}
+
+/* implements dijkstras algorithm for finding the shortest path length */
+int shortestPath(int start_node, int dest_node, int* next_hop) {
+     int dist[NODES]; //distance of node i to starting node
+     int prev[NODES]; //previous nodes in best path
+     int visited[NODES] = {0}; //has node been visited
+     int current = start_node; //currently at starting node
+     
+     int i;
+     for (i=0; i < NODES; i++) {
+         dist[i] = 9999;
+         prev[i] = -1;
+     }
+     
+     dist[start_node] = 0;
+
+     int min, d, m;
+     while(selected[dest_node] == 0) { //while the target has not been visited
+        min = 9999;
+        m = 0;
+        for(i=0; i < NODES; i++) { //go through each neighbor node
+            if (isNeighbor(current, i) == false) { //if this node is not connected to the current node
+                continue;
+            }
+            d = dist[current] + TIME_COST; //increment distance
+            if (d < dist[i] && visited[i] == 0) { //if this is the shortest path and we have not visited it
+                dist[i] = d; //the distance to it is d
+                prev[i] = current; //the previous node is the current node
+            }
+            if (dist[i] < min && visited[i] == 0) { //if this is the minimum path
+                min = dist[i]; //set it to be so
+                m = i;
+            }
+        }
+        current = m;
+        visited[current] = 1;
+     }
+	 *next_hop = dest_node;
+	 while(prev[*next_hop] != start_node)
+		*next_hop = prev[*next_hop];
+     return dist[dest_node];
+}
+
+/* return true if there is an event occurring before end_time */
+bool isEventBefore(Event* events,int events_size,int end_time){
+    int i;
+    for (i=0; i < events_size; i++) { //iterate through events
+        if (events[i].time < end_time) { //if there is an event that occurs before the specified time
+            return true; 
+        }
+    }
+    return false;
 }
 
 /* Handles code for dispatcher ranks */
@@ -206,11 +285,13 @@ void handlerOp() {
 				
 				int most_profit_node;
 				int highest_profit;
+				int best_hop;
 				
 				//Find the most profitable way to sell/fill our inventory.
 				for(int i = 0; i < agent.prices_size ; i++)
 				{
-					int dist_cost = getDist(agent.prices[i].location) * TIME_COST;
+					int next_hop;
+					int dist_cost = shortestPath(agent.location,agent.prices[i].location,&next_hop) * TIME_COST;
 					int profit
 					//If we have inventory sell it, if we don't try to fill it
 					if(inventory != 0)
@@ -220,6 +301,7 @@ void handlerOp() {
 					profit -= dist_cost;
 					if(profit > highest_profit)
 					{
+						best_hop = next_hop;
 						most_profit_node = agent.prices[i].location;
 						highest_profit = profit;
 					}
@@ -235,11 +317,10 @@ void handlerOp() {
 				}
 				
 				//Create a new event in the most profitable direction.
-				int next_node_id = getFirstInPath(agent.location,most_profit_node);
 				int disp_command = 2;
-				MPI_ISend(&disp_command, 1, MPI_INT, dispatcher, 0, MPI_COMM_WORLD);
-				MPI_ISend(&next_node, 1, MPI_INT, dispatcher, disp_command, MPI_COMM_WORLD);
-				MPI_ISent(&agent_id, 1, MPI_INT, dispatcher, disp_command, MPI_COMM_WORLD);
+				MPI_Bsend(&disp_command, 1, MPI_INT, dispatcher, 0, MPI_COMM_WORLD);
+				MPI_Bsend(&best_hop, 1, MPI_INT, dispatcher, disp_command, MPI_COMM_WORLD);
+				MPI_Bsend(&agent_id, 1, MPI_INT, dispatcher, disp_command, MPI_COMM_WORLD);
 				
 				//check for inconsistencies on that node
 				
