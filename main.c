@@ -11,13 +11,13 @@
 #define GetTimeBase MPI_Wtime
 #endif
 
-#define TICKS 32 //how many ticks of time to run this for 
-#define BLOCK 2 //size of a communication block; each block gets one dispatcher rank
-#define TIME_COST 1 //how much each unit of distance travelled costs the agent
+#define TICKS ticks //32 //how many ticks of time to run this for 
+#define BLOCK block_size //2 //size of a communication block; each block gets one dispatcher rank
+#define TIME_COST time_cost // //how much each unit of distance travelled costs the agent
 #define INVENTORY_CAP 10 //how much an agent can carry at maximum
-#define EXPLORE_THRESHOLD -100 //At what point a lack of profitable moves causes the agent to explore randomly
-#define AGENTS 20 //Number of agents, temporary, should be replaced with variable
-#define NODES 20 // Number of nodes
+#define EXPLORE_THRESHOLD explore_threshold //-100 //At what point a lack of profitable moves causes the agent to explore randomly
+#define AGENTS num_agents //20 //Number of agents, temporary, should be replaced with variable
+#define NODES num_nodes //20 // Number of nodes
 
 int num_agents, num_nodes, ticks, block_size, time_cost, explore_threshold; // set by arguments of program call
 
