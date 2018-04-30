@@ -456,8 +456,8 @@ void initWorld() {
         // probably implement read-network-from-file if there's time?
         nodes[i].connection_size = 2;
         nodes[i].connected = (int *) malloc (nodes[i].connection_size * sizeof(int));
-        nodes[i].connected[0] = (i + 1) % 20;
-        nodes[i].connected[0] = (i - 1) % 20;            
+        nodes[i].connected[0] = (i + 1) % NODES;
+        nodes[i].connected[0] = (i - 1) % NODES;            
     }
 	
 	agents = calloc(sizeof(Agent),AGENTS);
