@@ -262,6 +262,7 @@ void dispatcherOp() {
 				
 			//Attempt to acquire the given node
 			//Send lock requests to all nodes
+			printf("**Dispatcher %d attempting to lock %d.\n",mpi_rank,e->location);
 			for(int i = 0; i < world_size; i += BLOCK)
 			{	
 				if(i == mpi_rank)
@@ -275,14 +276,21 @@ void dispatcherOp() {
 			bool is_cleared = true;
 			
 			//Wait for all other dispatchers to respond
-			for(int i = 0; i < world_size/BLOCK - 1; i++)
+			int i = 0;
+			while(i < world_size/BLOCK - 1 && is_cleared == true)
 			{
 				MPI_Status lock_stat;
 				int response;
-				MPI_Recv(&response,1,MPI_INT,MPI_ANY_SOURCE,3,MPI_COMM_WORLD,&lock_stat);
+				int command;
+				int local_flag
+				MPI_Iprobe(MPI_ANY_SOURCE,3,MPI_COMM_WORLD,&local_flag,&lock_stat);
+				//Listen for any 
+				
+				MPI_Recv(&response,1,MPI_INT,MPI_ANY_SOURCE,10+e->location,MPI_COMM_WORLD,&lock_stat);
 				switch(response)
 				{
 					case -1://Permit message
+						i++;
 						break;
 					case -2://I have already given my lock to a higher-priority dispatcher
 						is_cleared = false;
@@ -291,7 +299,7 @@ void dispatcherOp() {
 						is_cleared = false;
 						i--;//Double message from another task
 						break;
-					default://I am attempting to acquire a lock on this node myself
+					default:
 						if(mpi_rank < lock_stat.MPI_SOURCE)//I outrank you and will usurp the lock
 						{
 							response = -2;
@@ -303,6 +311,7 @@ void dispatcherOp() {
 						}
 						MPI_Send(&response,1,MPI_INT,i,3,MPI_COMM_WORLD);
 						break;
+						
 				}
 			}
 			
@@ -429,21 +438,21 @@ void dispatcherOp() {
 						if(dispatching_locks[i] == req_node)
 						{
 							response = -2;
-							MPI_Send(&response, 1, MPI_INT, stat.MPI_SOURCE, 3, MPI_COMM_WORLD);
+							MPI_Send(&response, 1, MPI_INT, 10+req_node, 3, MPI_COMM_WORLD);
 							printf("**Dispatcher %d responed to a lock request concerning node %d from %d with code %d.\n",mpi_rank,req_node,stat.MPI_SOURCE,response);
 							break;
 						}
 					}
 					dispatching_locks[stat.MPI_SOURCE / BLOCK] = req_node;
 					response = -1;
-					MPI_Send(&response, 1, MPI_INT, stat.MPI_SOURCE, 3, MPI_COMM_WORLD);
+					MPI_Send(&response, 1, MPI_INT, stat.MPI_SOURCE, 10+req_node, MPI_COMM_WORLD);
 					printf("**Dispatcher %d responed to a lock request concerning node %d from %d with code %d.\n",mpi_rank,req_node,stat.MPI_SOURCE,response);
 					for(int i = stat.MPI_SOURCE / BLOCK + 1; i < world_size / BLOCK; i++)
 					{
 						if(dispatching_locks[i] == req_node)
 						{
 							response = -3;
-							MPI_Send(&response, 1, MPI_INT, i * BLOCK, 3, MPI_COMM_WORLD);
+							MPI_Send(&response, 1, MPI_INT, i * BLOCK, 10+req_node, MPI_COMM_WORLD);
 							dispatching_locks[i] = -1;
 							printf("**Dispatcher %d responed to a lock request concerning node %d from %d with code %d.\n",mpi_rank,req_node,stat.MPI_SOURCE,response);
 							break;
