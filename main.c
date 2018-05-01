@@ -409,7 +409,7 @@ void dispatcherOp() {
 			}
 			old_min_global_time = min_global_time;
 		}
-		printf("%d\n",min_global_time);
+		//printf("%d\n",min_global_time);
 		
 		int flag;
 		MPI_Status stat;
@@ -873,6 +873,14 @@ int main (int argc, char** argv) {
         time_in_secs = ((double)(end_cycles - start_cycles)) /
         processor_frequency;
 		
+		
+
+        //printf("%lld ", global_sum);
+        printf("%f\n", time_in_secs);
+    }
+	
+	if(mpi_rank == 1)
+	{
 		int max_profit = 0;
 		int best_agent = 0;
 		for(int i = 0; i < num_agents; i++)
@@ -897,10 +905,7 @@ int main (int argc, char** argv) {
 		
 		printf("Most profitable agent was %d with a total profit of %d.\n",best_agent,max_profit);
 		printf("Higest volume node was %d with a total volume of %d.\n",most_popular_node,max_trade_volume);
-
-        //printf("%lld ", global_sum);
-        printf("%f\n", time_in_secs);
-    }
+	}
 
     MPI_Barrier(MPI_COMM_WORLD); //wait for all processes
     MPI_Finalize();//close down this MPI
