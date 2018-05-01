@@ -628,7 +628,7 @@ void handlerOp() {
     MPI_Comm_rank(MPI_COMM_WORLD, &mpi_rank);
 	void* buf = calloc(sizeof(char),6*sizeof(int)*world_size*LOCAL_UPDATE_BUFFER+6*world_size*MPI_BSEND_OVERHEAD*LOCAL_UPDATE_BUFFER+1);
 	MPI_Buffer_attach(buf,6*sizeof(int)*world_size*LOCAL_UPDATE_BUFFER+6*world_size*MPI_BSEND_OVERHEAD*LOCAL_UPDATE_BUFFER+1);
-    Node** saved_nodes = calloc(num_saved_nodes = )
+    int current_time = 0;
     int dispatcher = mpi_rank - (mpi_rank % BLOCK); // calculate the dispatcher id for this rank
     int done = 0;
     while (!done) {
@@ -644,20 +644,22 @@ void handlerOp() {
 				command = 4;
 				int limit_time;
 				MPI_Recv(&limit_time, 1, MPI_INT, stat.MPI_SOURCE,4,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
-				
-				//Code for clearing out old saved states goes here.
+                
+				cleanStates(limit_time);
 				break;
 			case 3: //Update state for agent
 				command = 3;
 				int agent_id;
 				MPI_Recv(&agent_id, 1, MPI_INT, stat.MPI_SOURCE,3,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
 				Agent* agent = &agents[agent_id];
-				//Save old state here
+                saveState(current_time);
 				MPI_Recv(&agent->inventory, 1, MPI_INT, stat.MPI_SOURCE,3,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
 				MPI_Recv(&agent->advanced_time, 1, MPI_INT, stat.MPI_SOURCE,3,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
 				MPI_Recv(&agent->location,1, MPI_INT, stat.MPI_SOURCE,3,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
 				MPI_Recv(&agent->profit,1, MPI_INT, stat.MPI_SOURCE,3,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
 				MPI_Recv(&agent->prices,sizeof(LocPrice)*num_nodes,MPI_BYTE,stat.MPI_SOURCE,3,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
+
+                current_time = agent->advanced_time;
 				
 				//Also consider how to send the old state saves as well.
 				break;
@@ -675,7 +677,8 @@ void handlerOp() {
 								
 				Node* node = &nodes[node_id];
 				
-				//Save old state here
+                saveState(current_time);
+                current_time = new_time;
 				
 				//Create a new node with updated parameters and replace the old node with it.
 				//TEMPORARY: Just use the reference into the list
@@ -701,6 +704,13 @@ void handlerOp() {
 				int arrive_time;
 				MPI_Recv(&agent_id, 1, MPI_INT, dispatcher,1,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
 				MPI_Recv(&arrive_time, 1, MPI_INT, dispatcher,1,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
+
+                // Check for rollback condition
+                if (arrive_time < current_time) {
+                    // Rollback to earlier state
+                    rollback(arrive_time);
+                    //XXX Send rollback to dispatcher
+                }
 				
 				agent = &agents[agent_id];
 				
@@ -780,6 +790,8 @@ void handlerOp() {
 				agent->advanced_time = arrive_time;
 				agent->location = best_hop;
 				node->advanced_time = agent->advanced_time;
+                current_time = arrive_time;
+                saveState(current_time);
 				//Send state updates to all other workers
 				for(int i = 0; i < world_size; i++)
 				{
