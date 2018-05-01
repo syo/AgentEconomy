@@ -20,6 +20,8 @@ int time_cost;
 int explore_threshold;
 int irrationality;//Chance out of 1000 the agent will pick a random destination instead of the most profitable one
 
+MPI_Datatype price_loc_type;
+
 
 #define LOCAL_UPDATE_BUFFER 6//Number of buffer spaces to allow for node updates.
 #define TICKS ticks //32 //how many ticks of time to run this for 
@@ -44,6 +46,7 @@ typedef struct Node{
 	struct Node* previous_state; //For rolling back node states
     int* connected; //array of nodes it is connected to
 	unsigned int connection_size; //number of nodes it is connected to
+	long trade_volume;
 } Node;
 
 typedef struct {
@@ -54,6 +57,7 @@ typedef struct {
 	
     LocPrice* prices; //array of locations it has visited and their price
 	unsigned int prices_size;
+	long profit;
 } Agent;
 
 typedef struct Event{
@@ -507,27 +511,40 @@ void handlerOp() {
 	int world_size;
     MPI_Comm_size(MPI_COMM_WORLD, &world_size);
     MPI_Comm_rank(MPI_COMM_WORLD, &mpi_rank);
-	void* buf = calloc(sizeof(char),4*sizeof(int)*world_size*LOCAL_UPDATE_BUFFER+4*world_size*MPI_BSEND_OVERHEAD*LOCAL_UPDATE_BUFFER+1);
-	MPI_Buffer_attach(buf,4*sizeof(int)*world_size*LOCAL_UPDATE_BUFFER+4*world_size*MPI_BSEND_OVERHEAD*LOCAL_UPDATE_BUFFER+1);
+	void* buf = calloc(sizeof(char),6*sizeof(int)*world_size*LOCAL_UPDATE_BUFFER+6*world_size*MPI_BSEND_OVERHEAD*LOCAL_UPDATE_BUFFER+1);
+	MPI_Buffer_attach(buf,6*sizeof(int)*world_size*LOCAL_UPDATE_BUFFER+6*world_size*MPI_BSEND_OVERHEAD*LOCAL_UPDATE_BUFFER+1);
     int dispatcher = mpi_rank - (mpi_rank % BLOCK); // calculate the dispatcher id for this rank
     int done = 0;
     while (!done) {
         //wait for a command
         int command;
+		MPI_Status stat;
         MPI_Recv(&command, 1, MPI_INT, dispatcher, 0, MPI_COMM_WORLD,
-            MPI_STATUS_IGNORE);
+            &stat);
 
         // XXX TODO: full list of commands
         switch(command) { //determine what the command is and execute properly
+			case 3: //Update state for agent
+				command = 3;
+				int agent_id;
+				MPI_Recv(&agent_id, 1, MPI_INT, stat.MPI_SOURCE,2,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
+				Agent* agent = &agents[agent_id];
+				MPI_Recv(&agent->inventory, 1, MPI_INT, stat.MPI_SOURCE,2,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
+				MPI_Recv(&agent->advanced_time, 1, MPI_INT, stat.MPI_SOURCE,2,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
+				MPI_Recv(&agent->location,1, MPI_INT, stat.MPI_SOURCE,2,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
+				MPI_Recv(&agent->profit,1, MPI_INT, stat.MPI_SOURCE,2,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
+				MPI_Recv(&agent->prices,sizeof(LocPrice)*num_nodes,MPI_BYTE,stat.MPI_SOURCE,2,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
 			case 2: //Update state for node
 				command = 2;
 				int node_id;
 				int new_price;
 				int new_time;
+				int new_volume;
 				
-				MPI_Recv(&node_id, 1, MPI_INT, dispatcher,2,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
-				MPI_Recv(&new_price, 1, MPI_INT, dispatcher,2,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
-				MPI_Recv(&new_time, 1, MPI_INT, dispatcher,2,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
+				MPI_Recv(&node_id, 1, MPI_INT, stat.MPI_SOURCE,2,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
+				MPI_Recv(&new_price, 1, MPI_INT, stat.MPI_SOURCE,2,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
+				MPI_Recv(&new_time, 1, MPI_INT, stat.MPI_SOURCE,2,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
+				MPI_Recv(&new_volume,1, MPI_INT, stat.MPI_SOURCE,2,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
 								
 				Node* node = &nodes[node_id];
 				
@@ -538,6 +555,7 @@ void handlerOp() {
 				new_node->buy_price = new_price;
 				//new_node->sell_price = sell_price;
 				new_node->advanced_time = new_time;
+				new_node->trade_volume = new_volume;
 				//new_node->previous_state = node;
 				//new_node->connected = calloc(sizeof(int),node->connection_size);
 				/*for(int i = 0; i < node->connection_size; i++)
@@ -550,11 +568,10 @@ void handlerOp() {
             case 1: //Tag corresponds to case of command, i.e. a case 1/evaluate event reads messages with tag 1
                 //get an event from MPI recv and schedule it
 				command = 1;
-				int agent_id;
 				
 				MPI_Recv(&agent_id, 1, MPI_INT, dispatcher,1,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
 				
-				Agent* agent = &agents[agent_id];
+				agent = &agents[agent_id];
 				
 				int most_profit_node;
 				int highest_profit = -1000000000;//Arbitrary large negative number. INT_MIN can invoke over/underflow when manipulated
@@ -614,25 +631,44 @@ void handlerOp() {
 				{
 					//Buying/selling at current node
 					if(agent->inventory != 0)
+					{
 						agent->inventory = 0;
+						node->trade_volume += INVENTORY_CAP * node->sell_price;
+					}
 					else
+					{
 						agent->inventory = INVENTORY_CAP;
+						node->trade_volume += INVENTORY_CAP * node->buy_price;
+					}
+					
 				}
 				
 				//Update agent state
 				agent->advanced_time++;
 				arrive_time = agent->advanced_time;
 				agent->location = best_hop;
-				
+				//Send state updates to all other workers
 				for(int i = 0; i < world_size; i++)
 				{
 					if(i % BLOCK == 0)
 						continue;
 					int worker_command = 2;
+					//Update node
 					MPI_Bsend(&worker_command, 1, MPI_INT, i,0,MPI_COMM_WORLD);
 					MPI_Bsend(&node->node_id, 1, MPI_INT, i,2,MPI_COMM_WORLD);
 					MPI_Bsend(&node->buy_price, 1, MPI_INT, i,2,MPI_COMM_WORLD);
 					MPI_Bsend(&node->advanced_time, 1, MPI_INT, i,2,MPI_COMM_WORLD);
+					MPI_Bsend(&node->trade_volume, 1, MPI_INT, i,2,MPI_COMM_WORLD);
+					//Update agent
+					worker_command = 3;
+					MPI_Bsend(&worker_command, 1, MPI_INT, i,0,MPI_COMM_WORLD);
+					MPI_Bsend(&agent_id, 1, MPI_INT, i,2,MPI_COMM_WORLD);
+					Agent* agent = &agents[agent_id];
+					MPI_Bsend(&agent->inventory, 1, MPI_INT, i,2,MPI_COMM_WORLD);
+					MPI_Bsend(&agent->advanced_time, 1, MPI_INT, i,2,MPI_COMM_WORLD);
+					MPI_Bsend(&agent->location,1, MPI_INT, i,2,MPI_COMM_WORLD);
+					MPI_Bsend(&agent->profit,1, MPI_INT, i,2,MPI_COMM_WORLD);
+					MPI_Bsend(&agent->prices,sizeof(LocPrice)*num_nodes,MPI_BYTE,i,2,MPI_COMM_WORLD);
 				}
 				//Create a new event in the most profitable direction.
 				int disp_command = 2;
@@ -718,6 +754,8 @@ int main (int argc, char** argv) {
     double processor_frequency = 1600000000.0;
     unsigned long long start_cycles=0;
     unsigned long long end_cycles=0;
+	
+	//MPI_Type_contiguous(3,MPI_INT,&price_loc_type);
 
 	srand(12180);
 	
