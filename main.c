@@ -18,6 +18,7 @@ int ticks;
 int block_size;
 int time_cost;
 int explore_threshold;
+int irrationality;//Chance out of 1000 the agent will pick a random destination instead of the most profitable one
 
 
 #define LOCAL_UPDATE_BUFFER 6//Number of buffer spaces to allow for node updates.
@@ -25,13 +26,14 @@ int explore_threshold;
 #define BLOCK block_size //2 //size of a communication block; each block gets one dispatcher rank
 #define TIME_COST time_cost // //how much each unit of distance travelled costs the agent
 #define INVENTORY_CAP 10 //how much an agent can carry at maximum
-#define EXPLORE_THRESHOLD explore_threshold //-100 //At what point a lack of profitable moves causes the agent to explore randomly
+#define EXPLORE_THRESHOLD explore_threshold //100 //At what point a lack of profitable moves causes the agent to explore randomly
 #define AGENTS num_agents //20 //Number of agents, temporary, should be replaced with variable
 #define NODES num_nodes //20 // Number of nodes
 
 typedef struct{
     int location; //node id of a location
-    int price; //price at that location
+    int buy_price; //price at that location
+	int sell_price;
 } LocPrice;
 
 typedef struct Node{
@@ -140,18 +142,15 @@ int shortestPath(int start_node, int dest_node, int* next_hop) {
      while(visited[dest_node] == 0) { //while the target has not been visited
         min = 9999;
         m = 0;
-        for(i=0; i < NODES; i++) { //go through each neighbor node
-            if (isNeighbor(current, i) == false) { //if this node is not connected to the current node
-                continue;
-            }
+        for(i=0; i < nodes[current].connection_size;i++) { //go through each neighbor node
             d = dist[current] + TIME_COST; //increment distance
-            if (d < dist[i] && visited[i] == 0) { //if this is the shortest path and we have not visited it
-                dist[i] = d; //the distance to it is d
-                prev[i] = current; //the previous node is the current node
+            if (d < dist[nodes[current].connected[i]] && visited[nodes[current].connected[i]] == 0) { //if this is the shortest path and we have not visited it
+                dist[nodes[current].connected[i]] = d; //the distance to it is d
+                prev[nodes[current].connected[i]] = current; //the previous node is the current node
             }
-            if (dist[i] < min && visited[i] == 0) { //if this is the minimum path
-                min = dist[i]; //set it to be so
-                m = i;
+            if (dist[nodes[current].connected[i]] < min && visited[nodes[current].connected[i]] == 0) { //if this is the minimum path
+                min = dist[nodes[current].connected[i]]; //set it to be so
+                m = nodes[current].connected[i];
             }
         }
         current = m;
@@ -262,13 +261,13 @@ void dispatcherOp() {
 				
 			//Attempt to acquire the given node
 			//Send lock requests to all nodes
-			printf("**Dispatcher %d attempting to lock %d.\n",mpi_rank,e->location);
+			//printf("**Dispatcher %d attempting to lock %d.\n",mpi_rank,e->location);
 			for(int i = 0; i < world_size; i += BLOCK)
 			{	
 				if(i == mpi_rank)
 					continue;
 					
-				printf("**Dispatcher %d sent lock request to rank %d.\n",mpi_rank,i);
+				//printf("**Dispatcher %d sent lock request to rank %d.\n",mpi_rank,i);
 				command = 3;//Request to lock a node for dispatching
 				MPI_Bsend(&command, 1, MPI_INT,i,0,MPI_COMM_WORLD);
 				MPI_Bsend(&e->location,1,MPI_INT,i,3,MPI_COMM_WORLD);
@@ -282,7 +281,7 @@ void dispatcherOp() {
 				MPI_Status lock_stat;
 				int response;
 				int command;
-				int local_flag
+				int local_flag;
 				MPI_Iprobe(MPI_ANY_SOURCE,3,MPI_COMM_WORLD,&local_flag,&lock_stat);
 				//Listen for any 
 				
@@ -326,7 +325,7 @@ void dispatcherOp() {
 				available_ranks = available_ranks->next;
 				
 				
-				printf("**Dispatcher %d tasked event by agent %d on node %d on task %d.\n",mpi_rank,e->agent_id,e->location,temp_rank->mpi_rank);
+				//printf("**Dispatcher %d tasked event by agent %d on node %d on task %d.\n",mpi_rank,e->agent_id,e->location,temp_rank->mpi_rank);
 				for(int i = 0; i < world_size; i += BLOCK)
 				{	
 					if(i == mpi_rank)
@@ -379,7 +378,7 @@ void dispatcherOp() {
 					new_rank->mpi_rank = stat.MPI_SOURCE;
 					new_rank->next = available_ranks;
 					available_ranks = new_rank;
-					printf("**Dispatcher %d had rank %d sucessfuly complete an event.\n",mpi_rank,new_rank->mpi_rank);
+					//printf("**Dispatcher %d had rank %d sucessfuly complete an event.\n",mpi_rank,new_rank->mpi_rank);
 					break;
 				case 2:
 					//Create new event
@@ -390,7 +389,7 @@ void dispatcherOp() {
 					new_event->location = best_hop;
 					new_event->agent_id = agent_id;
 					new_event->time = time;
-					printf("**Dispatcher %d executed a request by task %d to add an event at %d for agent %d at time %d.\n",mpi_rank,stat.MPI_SOURCE,best_hop,agent_id,time);
+					//printf("**Dispatcher %d executed a request by task %d to add an event at %d for agent %d at time %d.\n",mpi_rank,stat.MPI_SOURCE,best_hop,agent_id,time);
 					//Insert event in a time-sorted order
 					Event* insert_before = events;
 					if(events == NULL)
@@ -439,14 +438,14 @@ void dispatcherOp() {
 						{
 							response = -2;
 							MPI_Send(&response, 1, MPI_INT, 10+req_node, 3, MPI_COMM_WORLD);
-							printf("**Dispatcher %d responed to a lock request concerning node %d from %d with code %d.\n",mpi_rank,req_node,stat.MPI_SOURCE,response);
+							//printf("**Dispatcher %d responed to a lock request concerning node %d from %d with code %d.\n",mpi_rank,req_node,stat.MPI_SOURCE,response);
 							break;
 						}
 					}
 					dispatching_locks[stat.MPI_SOURCE / BLOCK] = req_node;
 					response = -1;
 					MPI_Send(&response, 1, MPI_INT, stat.MPI_SOURCE, 10+req_node, MPI_COMM_WORLD);
-					printf("**Dispatcher %d responed to a lock request concerning node %d from %d with code %d.\n",mpi_rank,req_node,stat.MPI_SOURCE,response);
+					//printf("**Dispatcher %d responed to a lock request concerning node %d from %d with code %d.\n",mpi_rank,req_node,stat.MPI_SOURCE,response);
 					for(int i = stat.MPI_SOURCE / BLOCK + 1; i < world_size / BLOCK; i++)
 					{
 						if(dispatching_locks[i] == req_node)
@@ -454,7 +453,7 @@ void dispatcherOp() {
 							response = -3;
 							MPI_Send(&response, 1, MPI_INT, i * BLOCK, 10+req_node, MPI_COMM_WORLD);
 							dispatching_locks[i] = -1;
-							printf("**Dispatcher %d responed to a lock request concerning node %d from %d with code %d.\n",mpi_rank,req_node,stat.MPI_SOURCE,response);
+							//printf("**Dispatcher %d responed to a lock request concerning node %d from %d with code %d.\n",mpi_rank,req_node,stat.MPI_SOURCE,response);
 							break;
 						}
 					}
@@ -482,7 +481,7 @@ void dispatcherOp() {
 						}
 						e = e->next;
 					}
-					printf("**Dispatcher %d cleared lock from task %d and removed event at %d by %d.\n",mpi_rank,stat.MPI_SOURCE,req_node,agent_id);
+					//printf("**Dispatcher %d cleared lock from task %d and removed event at %d by %d.\n",mpi_rank,stat.MPI_SOURCE,req_node,agent_id);
 					break;
 				default:
 					break;
@@ -571,10 +570,11 @@ void handlerOp() {
 					//Check if we're considering the current node, update price knowledge
 					if(i == agent->location)
 					{
-						agent->prices[i].price = node->buy_price;
+						agent->prices[i].buy_price = node->buy_price;
+						agent->prices[i].sell_price = node->buy_price;
 					}
 					//Check if we have a valid price for the node we're considering
-					if(agent->prices[i].price == -1)
+					if(agent->prices[i].sell_price == -1)
 					{
 						continue;
 					}
@@ -584,9 +584,9 @@ void handlerOp() {
 					int profit;
 					//If we have inventory sell it, if we don't try to fill it
 					if(agent->inventory != 0)
-						profit = agent->inventory * agent->prices[i].price;
+						profit = agent->inventory * agent->prices[i].sell_price;
 					else
-						profit = (INVENTORY_CAP - agent->inventory) * -agent->prices[i].price;
+						profit = (INVENTORY_CAP - agent->inventory) * -agent->prices[i].buy_price;
 					profit -= dist_cost;
 					if(profit > highest_profit)
 					{
@@ -594,6 +594,20 @@ void handlerOp() {
 						most_profit_node = agent->prices[i].location;
 						highest_profit = profit;
 					}
+					
+				}
+				
+				if(highest_profit < explore_threshold)
+				{
+					most_profit_node = rand() % num_nodes;
+					shortestPath(agent->location,most_profit_node,&best_hop);
+				}
+				
+				//Randomly deviate from known optimal
+				if(rand() % 1000 < irrationality)
+				{
+					most_profit_node = rand() % num_nodes;
+					shortestPath(agent->location,most_profit_node,&best_hop);
 				}
 				
 				if(most_profit_node == agent->location)
@@ -656,8 +670,8 @@ void initWorld() {
     for (i=0; i < NODES; i++) { //create NODES nodes
         // initialize basic properties
         nodes[i].node_id = i;
-        nodes[i].buy_price = 5; //temporary, can make it more interesting later
-        nodes[i].sell_price = 5; 
+        nodes[i].buy_price = rand() % 20; //temporary, can make it more interesting later
+		nodes[i].sell_price = nodes[i].buy_price + rand() % 10; 
         nodes[i].advanced_time = -1;
         nodes[i].previous_state = NULL; // will point to old versions later
 
@@ -667,7 +681,10 @@ void initWorld() {
         nodes[i].connection_size = 2;
         nodes[i].connected = (int *) malloc (nodes[i].connection_size * sizeof(int));
         nodes[i].connected[0] = (i + 1) % NODES;
-        nodes[i].connected[0] = (i - 1) % NODES;            
+		if(i == 0)
+			nodes[i].connected[1] = NODES - 1;
+		else
+			nodes[i].connected[1] = (i - 1) % NODES;            
     }
 	
 	agents = calloc(sizeof(Agent),AGENTS);
@@ -683,7 +700,8 @@ void initWorld() {
 		for(int j = 0; j < NODES;j++)
 		{
 			agents[i].prices[j].location = j;
-			agents[i].prices[j].price = -1;//Flag invalid prices.
+			agents[i].prices[j].buy_price = -1;//Flag invalid prices.
+			agents[i].prices[j].sell_price = -1;//Flag invalid prices.
 		}
 		agents[i].prices_size = NODES;
 	}
@@ -693,7 +711,7 @@ void initWorld() {
 int main (int argc, char** argv) {
     /* 
     * run with: 
-    * mpirun -np <number of ranks> ./main.exe <number of nodes> <number of agents> <ticks> <block size> <time cost> <explore threshold 
+    * mpirun -np <number of ranks> ./main.exe <number of nodes> <number of agents> <ticks> <block size> <time cost> <explore threshold> <irrationality>
     */
     // set up info for timing
     double time_in_secs = 0;
@@ -701,6 +719,8 @@ int main (int argc, char** argv) {
     unsigned long long start_cycles=0;
     unsigned long long end_cycles=0;
 
+	srand(12180);
+	
     // initialize MPI
     int world_size = -1;
     int mpi_rank = -1;
@@ -715,6 +735,7 @@ int main (int argc, char** argv) {
     block_size = atoi(argv[4]);
     time_cost = atoi(argv[5]);
     explore_threshold = atoi(argv[6]);
+	irrationality = atoi(argv[7]);
 
     if(mpi_rank == 0) { //start timer
         start_cycles= GetTimeBase();
