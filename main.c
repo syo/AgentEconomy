@@ -127,6 +127,7 @@ void rollback(int time) {
         free(cur_state);
         cur_state = tmp;
     }
+    last_state = cur_state;
 
     // Update current state values
     for (int i = 0; i < num_nodes, i++) {
