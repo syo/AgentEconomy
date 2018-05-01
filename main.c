@@ -405,6 +405,7 @@ void dispatcherOp() {
 				int update_com = 4;
 				MPI_Bsend(&update_com,1,MPI_INT,i,0,MPI_COMM_WORLD);
 				MPI_Bsend(&min_global_time,1,MPI_INT,i,4,MPI_COMM_WORLD);
+				
 			}
 			old_min_global_time = min_global_time;
 		}
@@ -583,7 +584,7 @@ void handlerOp() {
 				MPI_Recv(&limit_time, 1, MPI_INT, stat.MPI_SOURCE,4,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
 				
 				//Code for clearing out old saved states goes here.
-		
+				break;
 			case 3: //Update state for agent
 				command = 3;
 				int agent_id;
@@ -597,7 +598,7 @@ void handlerOp() {
 				MPI_Recv(&agent->prices,sizeof(LocPrice)*num_nodes,MPI_BYTE,stat.MPI_SOURCE,3,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
 				
 				//Also consider how to send the old state saves as well.
-				
+				break;
 			case 2: //Update state for node
 				command = 2;
 				int node_id;
