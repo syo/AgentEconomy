@@ -524,16 +524,27 @@ void handlerOp() {
 
         // XXX TODO: full list of commands
         switch(command) { //determine what the command is and execute properly
+			case 4:
+				command = 4;
+				int limit_time;
+				MPI_Recv(&limit_time, 1, MPI_INT, stat.MPI_SOURCE,4,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
+				
+				//Code for clearing out old saved states goes here.
+		
 			case 3: //Update state for agent
 				command = 3;
 				int agent_id;
-				MPI_Recv(&agent_id, 1, MPI_INT, stat.MPI_SOURCE,2,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
+				MPI_Recv(&agent_id, 1, MPI_INT, stat.MPI_SOURCE,3,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
 				Agent* agent = &agents[agent_id];
-				MPI_Recv(&agent->inventory, 1, MPI_INT, stat.MPI_SOURCE,2,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
-				MPI_Recv(&agent->advanced_time, 1, MPI_INT, stat.MPI_SOURCE,2,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
-				MPI_Recv(&agent->location,1, MPI_INT, stat.MPI_SOURCE,2,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
-				MPI_Recv(&agent->profit,1, MPI_INT, stat.MPI_SOURCE,2,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
-				MPI_Recv(&agent->prices,sizeof(LocPrice)*num_nodes,MPI_BYTE,stat.MPI_SOURCE,2,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
+				//Save old state here
+				MPI_Recv(&agent->inventory, 1, MPI_INT, stat.MPI_SOURCE,3,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
+				MPI_Recv(&agent->advanced_time, 1, MPI_INT, stat.MPI_SOURCE,3,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
+				MPI_Recv(&agent->location,1, MPI_INT, stat.MPI_SOURCE,3,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
+				MPI_Recv(&agent->profit,1, MPI_INT, stat.MPI_SOURCE,3,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
+				MPI_Recv(&agent->prices,sizeof(LocPrice)*num_nodes,MPI_BYTE,stat.MPI_SOURCE,3,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
+				
+				//Also consider how to send the old state saves as well.
+				
 			case 2: //Update state for node
 				command = 2;
 				int node_id;
@@ -547,6 +558,8 @@ void handlerOp() {
 				MPI_Recv(&new_volume,1, MPI_INT, stat.MPI_SOURCE,2,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
 								
 				Node* node = &nodes[node_id];
+				
+				//Save old state here
 				
 				//Create a new node with updated parameters and replace the old node with it.
 				//TEMPORARY: Just use the reference into the list
