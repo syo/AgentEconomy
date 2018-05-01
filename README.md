@@ -13,10 +13,15 @@ If Blue Gene complains about line breaks, run:
 sed -i.bak 's/\r$//' run.sh
 
 Example of how to run on Blue Gene:
+
 ssh q
+
 module load xl
+
 make 
+
 sbatch --partition medium --nodes 128 --time 15 ./run.sh
+
 
 Which will output the results to 'proj.log', in the format:
 131.003111
