@@ -92,7 +92,7 @@ void writeAgentToFile(Agent agent) {
 bool isEventBefore(Event* next_event,int time){
 	while(next_event != NULL)
 	{
-		if(next_event->time < TICKS)
+		if(next_event->time < time)
 		{
 			return true;
 		}
@@ -191,6 +191,7 @@ void dispatcherOp() {
 	for(int i = 0; i < AGENTS; i++)
 	{
 		Event* new_event = malloc(sizeof(Event));
+		agents[i].location = i;
 		new_event->location = i;
 		new_event->agent_id = i;
 		new_event->time = 0;
@@ -241,11 +242,11 @@ void dispatcherOp() {
 				e = next_event;
 				while(e != NULL)
 				{	
-					e = e->previous;
 					if( e->time < TICKS)
 					{
 						break;
 					}
+					e = e->previous;
 				}
 				if(e == NULL)
 					break;
@@ -265,6 +266,8 @@ void dispatcherOp() {
 			{	
 				if(i == mpi_rank)
 					continue;
+					
+				printf("**Dispatcher %d sent lock request to rank %d.\n",mpi_rank,i);
 				command = 3;//Request to lock a node for dispatching
 				MPI_Bsend(&command, 1, MPI_INT,i,0,MPI_COMM_WORLD);
 				MPI_Bsend(&e->location,1,MPI_INT,i,3,MPI_COMM_WORLD);
@@ -295,7 +298,7 @@ void dispatcherOp() {
 						}
 						else
 						{
-							response = -2;
+							response = -1;
 							is_cleared = false;
 						}
 						MPI_Send(&response,1,MPI_INT,i,3,MPI_COMM_WORLD);
@@ -312,6 +315,19 @@ void dispatcherOp() {
 				MPI_Bsend(&agent_id, 1, MPI_INT, available_ranks->mpi_rank,1,MPI_COMM_WORLD);
 				Subrank* temp_rank = available_ranks;
 				available_ranks = available_ranks->next;
+				
+				
+				printf("**Dispatcher %d tasked event by agent %d on node %d on task %d.\n",mpi_rank,e->agent_id,e->location,temp_rank->mpi_rank);
+				for(int i = 0; i < world_size; i += BLOCK)
+				{	
+					if(i == mpi_rank)
+						continue;
+					command = 4;
+					MPI_Bsend(&command, 1, MPI_INT,i,0,MPI_COMM_WORLD);
+					MPI_Bsend(&e->location, 1, MPI_INT,i,4,MPI_COMM_WORLD);
+					MPI_Bsend(&agent_id, 1, MPI_INT,i,4,MPI_COMM_WORLD);
+					MPI_Bsend(&e->time, 1, MPI_INT,i,4,MPI_COMM_WORLD);
+				}
 			
 				//Remove event from list
 				if(e->previous != NULL)
@@ -321,18 +337,13 @@ void dispatcherOp() {
 				if(e == next_event);
 					next_event = e->previous;
 				if(e == events)
-					events = NULL;
+					events = e->next;
 				free(e);
 				free(temp_rank);
 				
-				for(int i = 0; i < world_size; i += BLOCK)
-				{	
-					if(i == mpi_rank)
-						continue;
-					command = 4;
-					MPI_Bsend(&command, 1, MPI_INT,i,0,MPI_COMM_WORLD);
-				}
+				
 			}
+			
 			
 			}
 		}
@@ -359,6 +370,7 @@ void dispatcherOp() {
 					new_rank->mpi_rank = stat.MPI_SOURCE;
 					new_rank->next = available_ranks;
 					available_ranks = new_rank;
+					printf("**Dispatcher %d had rank %d sucessfuly complete an event.\n",mpi_rank,new_rank->mpi_rank);
 					break;
 				case 2:
 					//Create new event
@@ -369,18 +381,30 @@ void dispatcherOp() {
 					new_event->location = best_hop;
 					new_event->agent_id = agent_id;
 					new_event->time = time;
-					//Inserte event in a time-sorted order
+					printf("**Dispatcher %d executed a request by task %d to add an event at %d for agent %d at time %d.\n",mpi_rank,stat.MPI_SOURCE,best_hop,agent_id,time);
+					//Insert event in a time-sorted order
 					Event* insert_before = events;
-					while(insert_before->time > new_event->time && insert_before->next != NULL)
+					if(events == NULL)
 					{
-						insert_before = events->next;
-					}
-					new_event->next = insert_before;
-					new_event->previous = insert_before->previous;
-					if(insert_before->previous != NULL)
-						insert_before->previous = new_event;
-					else
 						events = new_event;
+						new_event->next = NULL;
+						new_event->previous = NULL;
+						next_event = new_event;
+					}
+					else
+					{
+						while(insert_before->time > new_event->time && insert_before->next != NULL)
+						{
+							insert_before = insert_before->next;
+						}
+						new_event->next = insert_before;
+						new_event->previous = insert_before->previous;
+						insert_before->previous = new_event;
+						if(new_event->previous != NULL)
+							new_event->previous->next = new_event;
+						else
+							events = new_event;
+					}
 					//Send message to all other dispatchers to add the event if this is not a dispatcher originated message
 					if(stat.MPI_SOURCE % BLOCK != 0)
 					{
@@ -406,25 +430,50 @@ void dispatcherOp() {
 						{
 							response = -2;
 							MPI_Send(&response, 1, MPI_INT, stat.MPI_SOURCE, 3, MPI_COMM_WORLD);
+							printf("**Dispatcher %d responed to a lock request concerning node %d from %d with code %d.\n",mpi_rank,req_node,stat.MPI_SOURCE,response);
 							break;
 						}
 					}
 					dispatching_locks[stat.MPI_SOURCE / BLOCK] = req_node;
 					response = -1;
 					MPI_Send(&response, 1, MPI_INT, stat.MPI_SOURCE, 3, MPI_COMM_WORLD);
+					printf("**Dispatcher %d responed to a lock request concerning node %d from %d with code %d.\n",mpi_rank,req_node,stat.MPI_SOURCE,response);
 					for(int i = stat.MPI_SOURCE / BLOCK + 1; i < world_size / BLOCK; i++)
 					{
 						if(dispatching_locks[i] == req_node)
 						{
 							response = -3;
-							MPI_Send(&response, 1, MPI_INT, stat.MPI_SOURCE, 3, MPI_COMM_WORLD);
+							MPI_Send(&response, 1, MPI_INT, i * BLOCK, 3, MPI_COMM_WORLD);
+							dispatching_locks[i] = -1;
+							printf("**Dispatcher %d responed to a lock request concerning node %d from %d with code %d.\n",mpi_rank,req_node,stat.MPI_SOURCE,response);
 							break;
 						}
 					}
 				case 4://Clear lock for node and remove it from event list
 					dispatching_locks[stat.MPI_SOURCE / BLOCK] = -1;
-					int req_node;
+					int agent_id,time;
 					MPI_Recv(&req_node,1,MPI_INT,stat.MPI_SOURCE,4,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
+					MPI_Recv(&agent_id,1,MPI_INT,stat.MPI_SOURCE,4,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
+					MPI_Recv(&time,1,MPI_INT,stat.MPI_SOURCE,4,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
+					Event * e = events;
+					while(e != NULL)
+					{
+						if(e->location == req_node && e->agent_id == agent_id && e->time == time)
+						{
+							if(e->previous != NULL)
+								e->previous->next = e->next;
+							if(e->next != NULL)
+								e->next->previous = e->previous;
+							if(e == next_event);
+								next_event = e->previous;
+							if(e == events && e->next != NULL)
+								events = e->next;
+							free(e);
+							break;
+						}
+						e = e->next;
+					}
+					printf("**Dispatcher %d cleared lock from task %d and removed event at %d by %d.\n",mpi_rank,stat.MPI_SOURCE,req_node,agent_id);
 					break;
 				default:
 					break;
