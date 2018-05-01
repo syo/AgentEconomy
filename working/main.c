@@ -4,7 +4,7 @@
 #include <stdbool.h>
 #include <string.h>
 
-//#define BGQ 1 // when running BG/Q, comment out when running on kratos
+#define BGQ 1 // when running BG/Q, comment out when running on kratos
 #ifdef BGQ
 #include <hwi/include/bqc/A2_inlines.h>
 #else
@@ -73,166 +73,9 @@ typedef struct Subrank{
 	struct Subrank* next;
 } Subrank;
 
-typedef struct State{
-    int advanced_time;
-    Node* nodes;
-    Agent* agents;
-    struct State* next;
-    struct State* prev;
-} State;
-
-typedef struct EventState{
-    int advanced_time;
-	Event* events;
-    struct EventState* next;
-    struct EventState* prev;
-} EventState;
-
 Node* nodes; // Array of all nodes in the project, ordered by node_id
 
 Agent* agents; // Array of all agents in the project, by agent_id
-
-State* saved_states = NULL;
-State* last_state = NULL;
-
-EventState* saved_event_states = NULL;
-EventState* last_event_state = NULL;
-
-//Returns a copy of the given event list.
-Event* copyList(Event* events)
-{
-	Event* copy = NULL;
-	Event* copyPrev = NULL;
-	while(events != NULL)
-	{
-		copy = malloc(sizeof(Event));
-		copy->location = events->location;
-		copy->agent_id = events->agent_id;
-		copy->time = events->time;
-		if(copyPrev != NULL)
-		{	
-			copyPrev->next = copy;
-		}
-		copy->previous = copyPrev;
-		copyPrev = copy;
-	}
-}
-
-
-//Frees all the events in the given list.
-void freeList(Event* events)
-{
-	while(events->next != NULL)
-	{
-		events = events->next;
-		free(events->previous);
-	}
-	free(events);
-}
-
-//Replaces the event list beginning and end with the given list
-void replaceList(Event** events,Event**next_event,Event* replacement)
-{
-	Event* temp = *events;
-	*events = replacement;
-	while(replacement->next != NULL)
-	{
-		replacement = replacement->next;
-	}
-	*next_event = replacement;
-	freeList(temp);
-}
-
-// Adds a state to the list of states
-void saveState(int time) {
-    State* tmp = malloc(sizeof(State));
-    tmp->advanced_time = time;
-    tmp->nodes = calloc(num_nodes, sizeof(Node));
-    for (int i = 0; i < num_nodes; i++) {
-        memcpy(&(tmp->nodes[i]), &(nodes[i]), sizeof(Node));
-    }
-    tmp->agents = calloc(num_agents, sizeof(Agent));
-    for (int i = 0; i < num_agents; i++) {
-        memcpy(&(tmp->agents[i]), &(agents[i]), sizeof(Agent));
-    }
-    tmp->next = NULL;
-    tmp->prev = last_state;
-
-    last_state->next = tmp;
-    last_state = tmp;
-}
-
-// Remove all states before time in the saved list
-void cleanStates(int time) {
-    State* cur_state = saved_states;
-    while (cur_state != NULL || cur_state->advanced_time < time) {
-        State* tmp = cur_state->next;
-		free(cur_state->nodes);
-		free(cur_state->agents);
-        free(cur_state);
-        cur_state = tmp;
-    }
-    saved_states = cur_state;
-}
-
-// Rollback the current state to a time and remove any saved states after it
-void rollback(int time) {
-    // Remove states after time
-    State* cur_state = last_state;
-    while(cur_state->advanced_time > time) {
-        State* tmp = cur_state->prev;
-        free(cur_state);
-        cur_state = tmp;
-    }
-    last_state = cur_state;
-
-    // Update current state values
-    for (int i = 0; i < num_nodes; i++) {
-        memcpy(&(nodes[i]), &(cur_state->nodes[i]), sizeof(Node));
-    }
-    for (int i = 0; i < num_agents; i++) {
-        memcpy(&(agents[i]), &(cur_state->agents[i]), sizeof(Agent));
-    }
-}
-
-void saveEventState(int time,Event* events) {
-    EventState* tmp = malloc(sizeof(EventState));
-    tmp->advanced_time = time;
-    tmp->events = copyList(events);
-    tmp->next = NULL;
-    tmp->prev = last_event_state;
-
-    last_event_state->next = tmp;
-    last_event_state = tmp;
-}
-
-// Remove all states before time in the saved list
-void cleanEventStates(int time) {
-    EventState* cur_state = saved_event_states;
-    while (cur_state != NULL || cur_state->advanced_time < time) {
-        EventState* tmp = cur_state->next;
-		freeList(cur_state->events);
-        free(cur_state);
-        cur_state = tmp;
-    }
-    saved_event_states = cur_state;
-}
-
-// Rollback the current state to a time and remove any saved states after it
-void rollbackEvent(int time,Event** events,Event** next_event) {
-    // Remove states after time
-    EventState* cur_state = last_event_state;
-    while(cur_state->advanced_time > time) {
-        EventState* tmp = cur_state->prev;
-        free(cur_state);
-        cur_state = tmp;
-    }
-    last_event_state = cur_state;
-
-    // Update current state values
-	replaceList(events,next_event,cur_state->events);
-}
-
 
 /* Writes the agent with specified id to a file for shared memory access */
 void writeAgentToFile(Agent agent) {
@@ -263,7 +106,6 @@ bool isEventBefore(Event* next_event,int time){
 	}
 	return false;
 }
-
 
 int minEventTime(Event* events)
 {
@@ -725,7 +567,6 @@ void handlerOp() {
     MPI_Comm_rank(MPI_COMM_WORLD, &mpi_rank);
 	void* buf = calloc(sizeof(char),6*sizeof(int)*world_size*LOCAL_UPDATE_BUFFER+6*world_size*MPI_BSEND_OVERHEAD*LOCAL_UPDATE_BUFFER+1);
 	MPI_Buffer_attach(buf,6*sizeof(int)*world_size*LOCAL_UPDATE_BUFFER+6*world_size*MPI_BSEND_OVERHEAD*LOCAL_UPDATE_BUFFER+1);
-    int current_time = 0;
     int dispatcher = mpi_rank - (mpi_rank % BLOCK); // calculate the dispatcher id for this rank
     int done = 0;
     while (!done) {
@@ -741,22 +582,20 @@ void handlerOp() {
 				command = 4;
 				int limit_time;
 				MPI_Recv(&limit_time, 1, MPI_INT, stat.MPI_SOURCE,4,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
-                
-				cleanStates(limit_time);
+				
+				//Code for clearing out old saved states goes here.
 				break;
 			case 3: //Update state for agent
 				command = 3;
 				int agent_id;
 				MPI_Recv(&agent_id, 1, MPI_INT, stat.MPI_SOURCE,3,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
 				Agent* agent = &agents[agent_id];
-                saveState(current_time);
+				//Save old state here
 				MPI_Recv(&agent->inventory, 1, MPI_INT, stat.MPI_SOURCE,3,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
 				MPI_Recv(&agent->advanced_time, 1, MPI_INT, stat.MPI_SOURCE,3,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
 				MPI_Recv(&agent->location,1, MPI_INT, stat.MPI_SOURCE,3,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
 				MPI_Recv(&agent->profit,1, MPI_INT, stat.MPI_SOURCE,3,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
 				MPI_Recv(&agent->prices,sizeof(LocPrice)*num_nodes,MPI_BYTE,stat.MPI_SOURCE,3,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
-
-                current_time = agent->advanced_time;
 				
 				//Also consider how to send the old state saves as well.
 				break;
@@ -774,8 +613,7 @@ void handlerOp() {
 								
 				Node* node = &nodes[node_id];
 				
-                saveState(current_time);
-                current_time = new_time;
+				//Save old state here
 				
 				//Create a new node with updated parameters and replace the old node with it.
 				//TEMPORARY: Just use the reference into the list
@@ -801,13 +639,6 @@ void handlerOp() {
 				int arrive_time;
 				MPI_Recv(&agent_id, 1, MPI_INT, dispatcher,1,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
 				MPI_Recv(&arrive_time, 1, MPI_INT, dispatcher,1,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
-
-                // Check for rollback condition
-                if (arrive_time < current_time) {
-                    // Rollback to earlier state
-                    rollback(arrive_time);
-                    //XXX Send rollback to dispatcher
-                }
 				
 				agent = &agents[agent_id];
 				
@@ -887,8 +718,6 @@ void handlerOp() {
 				agent->advanced_time = arrive_time;
 				agent->location = best_hop;
 				node->advanced_time = agent->advanced_time;
-                current_time = arrive_time;
-                saveState(current_time);
 				//Send state updates to all other workers
 				for(int i = 0; i < world_size; i++)
 				{
