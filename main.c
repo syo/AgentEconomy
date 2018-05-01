@@ -77,9 +77,16 @@ typedef struct State{
     int advanced_time;
     Node* nodes;
     Agent* agents;
-    State* next;
-    State* prev;
-}
+    struct State* next;
+    struct State* prev;
+} State;
+
+typedef struct EventState{
+    int advanced_time;
+	Event* events;
+    struct EventState* next;
+    struct EventState* prev;
+} EventState;
 
 Node* nodes; // Array of all nodes in the project, ordered by node_id
 
@@ -88,12 +95,60 @@ Agent* agents; // Array of all agents in the project, by agent_id
 State* saved_states = NULL;
 State* last_state = NULL;
 
+EventState* saved_event_states = NULL;
+EventState* last_event_state = NULL;
+
+//Returns a copy of the given event list.
+Event* copyList(Event* events)
+{
+	Event* copy = NULL;
+	Event* copyPrev = NULL;
+	while(events != NULL)
+	{
+		copy = malloc(sizeof(Event));
+		copy->location = events->location;
+		copy->agent_id = events->agent_id;
+		copy->time = events->time;
+		if(copyPrev != NULL)
+		{	
+			copyPrev->next = copy;
+		}
+		copy->previous = copyPrev;
+		copyPrev = copy;
+	}
+}
+
+
+//Frees all the events in the given list.
+void freeList(Event* events)
+{
+	while(events->next != NULL)
+	{
+		events = events->next;
+		free(events->previous);
+	}
+	free(events);
+}
+
+//Replaces the event list beginning and end with the given list
+void replaceList(Event** events,Event**next_event,Event* replacement)
+{
+	Event* temp = *events;
+	*events = replacement;
+	while(replacement->next != NULL)
+	{
+		replacement = replacement->next;
+	}
+	*next_event = replacement;
+	freeList(temp);
+}
+
 // Adds a state to the list of states
 void saveState(int time) {
     State* tmp = malloc(sizeof(State));
     tmp->advanced_time = time;
     tmp->nodes = calloc(num_nodes, sizeof(Node));
-    for (int i = 0; i < num_nodes, i++) {
+    for (int i = 0; i < num_nodes; i++) {
         memcpy(&(tmp->nodes[i]), &(nodes[i]), sizeof(Node));
     }
     tmp->agents = calloc(num_agents, sizeof(Agent));
@@ -112,6 +167,8 @@ void cleanStates(int time) {
     State* cur_state = saved_states;
     while (cur_state != NULL || cur_state->advanced_time < time) {
         State* tmp = cur_state->next;
+		free(cur_state->nodes);
+		free(cur_state->agents);
         free(cur_state);
         cur_state = tmp;
     }
@@ -130,13 +187,52 @@ void rollback(int time) {
     last_state = cur_state;
 
     // Update current state values
-    for (int i = 0; i < num_nodes, i++) {
+    for (int i = 0; i < num_nodes; i++) {
         memcpy(&(nodes[i]), &(cur_state->nodes[i]), sizeof(Node));
     }
     for (int i = 0; i < num_agents; i++) {
         memcpy(&(agents[i]), &(cur_state->agents[i]), sizeof(Agent));
     }
 }
+
+void saveEventState(int time,Event* events) {
+    EventState* tmp = malloc(sizeof(EventState));
+    tmp->advanced_time = time;
+    tmp->events = copyList(events);
+    tmp->next = NULL;
+    tmp->prev = last_event_state;
+
+    last_event_state->next = tmp;
+    last_event_state = tmp;
+}
+
+// Remove all states before time in the saved list
+void cleanEventStates(int time) {
+    EventState* cur_state = saved_event_states;
+    while (cur_state != NULL || cur_state->advanced_time < time) {
+        EventState* tmp = cur_state->next;
+		freeList(cur_state->events);
+        free(cur_state);
+        cur_state = tmp;
+    }
+    saved_event_states = cur_state;
+}
+
+// Rollback the current state to a time and remove any saved states after it
+void rollbackEvent(int time,Event** events,Event** next_event) {
+    // Remove states after time
+    EventState* cur_state = last_event_state;
+    while(cur_state->advanced_time > time) {
+        EventState* tmp = cur_state->prev;
+        free(cur_state);
+        cur_state = tmp;
+    }
+    last_event_state = cur_state;
+
+    // Update current state values
+	replaceEvents(events,next_event,cur_state->events);
+}
+
 
 /* Writes the agent with specified id to a file for shared memory access */
 void writeAgentToFile(Agent agent) {
@@ -167,6 +263,7 @@ bool isEventBefore(Event* next_event,int time){
 	}
 	return false;
 }
+
 
 int minEventTime(Event* events)
 {
