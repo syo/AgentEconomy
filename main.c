@@ -306,7 +306,7 @@ void dispatcherOp() {
 			bool is_cleared = true;
 			
 			//Wait for all other dispatchers to respond
-			int i = 0;/*
+			int i = 0;
 			while(i < world_size/BLOCK - 1 && is_cleared == true)
 			{
 				MPI_Status lock_stat;
@@ -343,7 +343,7 @@ void dispatcherOp() {
 						break;
 						
 				}
-			}*/
+			}
 			
 			if(is_cleared == true)
 			{
@@ -355,6 +355,7 @@ void dispatcherOp() {
 				//Send event handling command to task
 				MPI_Bsend(&command, 1, MPI_INT,available_ranks->mpi_rank,0,MPI_COMM_WORLD);
 				MPI_Bsend(&agent_id, 1, MPI_INT, available_ranks->mpi_rank,1,MPI_COMM_WORLD);
+				MPI_Bsend(&e->time, 1, MPI_INT, available_ranks->mpi_rank,1,MPI_COMM_WORLD);
 				Subrank* temp_rank = available_ranks;
 				available_ranks = available_ranks->next;
 				
@@ -634,14 +635,15 @@ void handlerOp() {
                 //get an event from MPI recv and schedule it
 				command = 1;
 				
+				int arrive_time;
 				MPI_Recv(&agent_id, 1, MPI_INT, dispatcher,1,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
+				MPI_Recv(&arrive_time, 1, MPI_INT, dispatcher,1,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
 				
 				agent = &agents[agent_id];
 				
 				int most_profit_node;
 				int highest_profit = -1000000000;//Arbitrary large negative number. INT_MIN can invoke over/underflow when manipulated
 				int best_hop;
-				int arrive_time;
 				
 				node = &nodes[agent->location];
 				node->advanced_time = agent->advanced_time;
@@ -711,9 +713,10 @@ void handlerOp() {
 				}
 				
 				//Update agent state
-				agent->advanced_time++;
-				arrive_time = agent->advanced_time;
+				arrive_time++;
+				agent->advanced_time = arrive_time;
 				agent->location = best_hop;
+				node->advanced_time = agent->advanced_time;
 				//Send state updates to all other workers
 				for(int i = 0; i < world_size; i++)
 				{
@@ -729,13 +732,14 @@ void handlerOp() {
 					//Update agent
 					worker_command = 3;
 					MPI_Bsend(&worker_command, 1, MPI_INT, i,0,MPI_COMM_WORLD);
-					MPI_Bsend(&agent_id, 1, MPI_INT, i,2,MPI_COMM_WORLD);
+					MPI_Bsend(&agent_id, 1, MPI_INT, i,3,MPI_COMM_WORLD);
 					Agent* agent = &agents[agent_id];
-					MPI_Bsend(&agent->inventory, 1, MPI_INT, i,2,MPI_COMM_WORLD);
-					MPI_Bsend(&agent->advanced_time, 1, MPI_INT, i,2,MPI_COMM_WORLD);
-					MPI_Bsend(&agent->location,1, MPI_INT, i,2,MPI_COMM_WORLD);
-					MPI_Bsend(&agent->profit,1, MPI_INT, i,2,MPI_COMM_WORLD);
-					MPI_Bsend(&agent->prices,sizeof(LocPrice)*num_nodes,MPI_BYTE,i,2,MPI_COMM_WORLD);
+					MPI_Bsend(&agent->inventory, 1, MPI_INT, i,3,MPI_COMM_WORLD);
+					MPI_Bsend(&agent->advanced_time, 1, MPI_INT, i,3,MPI_COMM_WORLD);
+					MPI_Bsend(&agent->location,1, MPI_INT, i,3,MPI_COMM_WORLD);
+					MPI_Bsend(&agent->profit,1, MPI_INT, i,3,MPI_COMM_WORLD);
+					MPI_Bsend(&agent->prices,sizeof(LocPrice)*num_nodes,MPI_BYTE,i,3,MPI_COMM_WORLD);
+					
 				}
 				//Create a new event in the most profitable direction.
 				int disp_command = 2;
