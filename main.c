@@ -73,9 +73,69 @@ typedef struct Subrank{
 	struct Subrank* next;
 } Subrank;
 
+typedef struct State{
+    int advanced_time;
+    Node* nodes;
+    Agent* agents;
+    State* next;
+    State* prev;
+}
+
 Node* nodes; // Array of all nodes in the project, ordered by node_id
 
 Agent* agents; // Array of all agents in the project, by agent_id
+
+State* saved_states = NULL;
+State* last_state = NULL;
+
+// Adds a state to the list of states
+void saveState(int time) {
+    State* tmp = malloc(sizeof(State));
+    tmp->advanced_time = time;
+    tmp->nodes = calloc(num_nodes, sizeof(Node));
+    for (int i = 0; i < num_nodes, i++) {
+        memcpy(&(tmp->nodes[i]), &(nodes[i]), sizeof(Node));
+    }
+    tmp->agents = calloc(num_agents, sizeof(Agent));
+    for (int i = 0; i < num_agents; i++) {
+        memcpy(&(tmp->agents[i]), &(agents[i]), sizeof(Agent));
+    }
+    tmp->next = NULL;
+    tmp->prev = last_state;
+
+    last_state->next = tmp;
+    last_state = tmp;
+}
+
+// Remove all states before time in the saved list
+void cleanStates(int time) {
+    State* cur_state = saved_states;
+    while (cur_state != NULL || cur_state->advanced_time < time) {
+        State* tmp = cur_state->next;
+        free(cur_state);
+        cur_state = tmp;
+    }
+    saved_states = cur_state;
+}
+
+// Rollback the current state to a time and remove any saved states after it
+void rollback(int time) {
+    // Remove states after time
+    State* cur_state = last_state;
+    while(cur_state->advanced_time > time) {
+        State* tmp = cur_state->prev;
+        free(cur_state);
+        cur_state = tmp;
+    }
+
+    // Update current state values
+    for (int i = 0; i < num_nodes, i++) {
+        memcpy(&(nodes[i]), &(cur_state->nodes[i]), sizeof(Node));
+    }
+    for (int i = 0; i < num_agents; i++) {
+        memcpy(&(agents[i]), &(cur_state->agents[i]), sizeof(Agent));
+    }
+}
 
 /* Writes the agent with specified id to a file for shared memory access */
 void writeAgentToFile(Agent agent) {
@@ -513,6 +573,7 @@ void handlerOp() {
     MPI_Comm_rank(MPI_COMM_WORLD, &mpi_rank);
 	void* buf = calloc(sizeof(char),6*sizeof(int)*world_size*LOCAL_UPDATE_BUFFER+6*world_size*MPI_BSEND_OVERHEAD*LOCAL_UPDATE_BUFFER+1);
 	MPI_Buffer_attach(buf,6*sizeof(int)*world_size*LOCAL_UPDATE_BUFFER+6*world_size*MPI_BSEND_OVERHEAD*LOCAL_UPDATE_BUFFER+1);
+    Node** saved_nodes = calloc(num_saved_nodes = )
     int dispatcher = mpi_rank - (mpi_rank % BLOCK); // calculate the dispatcher id for this rank
     int done = 0;
     while (!done) {
