@@ -107,6 +107,20 @@ bool isEventBefore(Event* next_event,int time){
 	return false;
 }
 
+int minEventTime(Event* events)
+{
+	int min_time = 10000000;
+	while(events != NULL)
+	{
+		if(events->time < min_time)
+		{
+			min_time = events->time;
+		}
+		events = events->next;
+	}
+	return min_time;
+}
+
 /* check to see if two nodes are connected */
 bool isNeighbor(int current, int q) {
     int i;
@@ -117,6 +131,16 @@ bool isNeighbor(int current, int q) {
         }
     } 
     return false;
+}
+
+void printEventTimes(Event* events)
+{
+	printf("[");
+	while(events != NULL)
+	{
+		printf("%d,",events->time);
+	}
+	printf("]");
 }
 
 /* implements dijkstras algorithm for finding the shortest path length */
@@ -212,6 +236,7 @@ void dispatcherOp() {
 	}
 	
 	Subrank* available_ranks = NULL;
+	Event** processing_events = calloc(sizeof(Event*),BLOCK);
 	
 	//Acquire all the handler ranks under us
 	for(int i = 1; i < BLOCK; i++)
@@ -220,6 +245,7 @@ void dispatcherOp() {
 		new_rank->mpi_rank = mpi_rank + i;
 		new_rank->next = available_ranks;
 		available_ranks = new_rank;
+		processing_events[i] = NULL;
 	}
 	
 	//Create buffer for buffered sends
@@ -232,6 +258,7 @@ void dispatcherOp() {
 		dispatching_locks[i] = -1;
 	}
     //go through event list
+	int old_min_global_time = 0;
 	while(isEventBefore(next_event,TICKS)){
 		//Dispatch events here.
 		//Get next event that is within time limit
@@ -279,7 +306,7 @@ void dispatcherOp() {
 			bool is_cleared = true;
 			
 			//Wait for all other dispatchers to respond
-			int i = 0;
+			int i = 0;/*
 			while(i < world_size/BLOCK - 1 && is_cleared == true)
 			{
 				MPI_Status lock_stat;
@@ -316,10 +343,13 @@ void dispatcherOp() {
 						break;
 						
 				}
-			}
+			}*/
 			
 			if(is_cleared == true)
 			{
+				
+				processing_events[available_ranks->mpi_rank - 1] = e;
+			
 				command = 1;
 				int agent_id = e->agent_id;
 				//Send event handling command to task
@@ -350,7 +380,8 @@ void dispatcherOp() {
 					next_event = e->previous;
 				if(e == events)
 					events = e->next;
-				free(e);
+				
+				
 				free(temp_rank);
 				
 				
@@ -359,8 +390,24 @@ void dispatcherOp() {
 			
 			}
 		}
-		
-		
+		int min_global_time = minEventTime(events);
+		for(int i = 0; i < BLOCK; i++)
+		{
+			if(processing_events[i] != NULL && min_global_time > processing_events[i]->time)
+				min_global_time = processing_events[i]->time;
+			
+		}
+		if(old_min_global_time != min_global_time)
+		{
+			for(int i = 1; i < BLOCK; i++)
+			{
+				int update_com = 4;
+				MPI_Bsend(&update_com,1,MPI_INT,i,0,MPI_COMM_WORLD);
+				MPI_Bsend(&min_global_time,1,MPI_INT,i,4,MPI_COMM_WORLD);
+			}
+			old_min_global_time = min_global_time;
+		}
+		printf("%d\n",min_global_time);
 		
 		int flag;
 		MPI_Status stat;
@@ -380,6 +427,11 @@ void dispatcherOp() {
 				case 0:
 					//Add rank back to available ranks
 					new_rank->mpi_rank = stat.MPI_SOURCE;
+					
+					//Free processing event
+					free(processing_events[new_rank->mpi_rank - 1]);
+					processing_events[new_rank->mpi_rank - 1] = NULL;
+					
 					new_rank->next = available_ranks;
 					available_ranks = new_rank;
 					//printf("**Dispatcher %d had rank %d sucessfuly complete an event.\n",mpi_rank,new_rank->mpi_rank);
@@ -647,11 +699,13 @@ void handlerOp() {
 					{
 						agent->inventory = 0;
 						node->trade_volume += INVENTORY_CAP * node->sell_price;
+						agent->profit += INVENTORY_CAP * node->sell_price;
 					}
 					else
 					{
 						agent->inventory = INVENTORY_CAP;
 						node->trade_volume += INVENTORY_CAP * node->buy_price;
+						agent->profit -= INVENTORY_CAP * node->buy_price;
 					}
 					
 				}
@@ -813,6 +867,31 @@ int main (int argc, char** argv) {
         end_cycles= GetTimeBase();
         time_in_secs = ((double)(end_cycles - start_cycles)) /
         processor_frequency;
+		
+		int max_profit = 0;
+		int best_agent = 0;
+		for(int i = 0; i < num_agents; i++)
+		{
+			if(max_profit < agents[i].profit)
+			{
+				max_profit = agents[i].profit;
+				best_agent = i;
+			}
+		}
+		
+		int most_popular_node = 0;
+		int max_trade_volume = 0;
+		for(int i = 0; i < num_nodes; i++)
+		{
+			if(max_trade_volume < nodes[i].trade_volume)
+			{
+				max_trade_volume = nodes[i].trade_volume;
+				most_popular_node = i;
+			}
+		}
+		
+		printf("Most profitable agent was %d with a total profit of %d.\n",best_agent,max_profit);
+		printf("Higest volume node was %d with a total volume of %d.\n",most_popular_node,max_trade_volume);
 
         //printf("%lld ", global_sum);
         printf("%f\n", time_in_secs);
