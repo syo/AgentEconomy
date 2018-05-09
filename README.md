@@ -4,7 +4,7 @@ A highly parallel agent-based economic simulation for deployment on the Blue Gen
 
 Work by Connor Hadley, Staeliam Schipper-Reyes, and Zachary Biletch
 
-Primarily for use on Blue Gene - it currently does not run on kratos, but it ***does run on Blue Gene*** which was the goal of the project
+Primarily for use on Blue Gene - may have bugs on other systems
 
 The current working build is in the "working" subdirectory
 
